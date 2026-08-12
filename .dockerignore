@@ -1,0 +1,12 @@
+.github
+.vscode
+examples
+tests
+.env.example
+.git
+.gitignore
+tests
+.mypy_cache
+.venv
+.pytest_cache
+.ruff_cache

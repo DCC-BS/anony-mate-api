@@ -1,0 +1,10 @@
+{
+    "recommendations": [
+        "ms-python.isort",
+        "ms-azuretools.vscode-docker",
+        "meta.pyrefly",
+        "ms-python.python",
+        "ms-python.debugpy",
+        "charliermarsh.ruff",
+        "SonarSource.sonarlint-vscode"
+    }

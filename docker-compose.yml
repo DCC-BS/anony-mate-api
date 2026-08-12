@@ -1,0 +1,45 @@
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.25.1
+    container_name: vllm_anony_mate_backend
+    ports:
+      - ${LLM_API_PORT}:8000
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    ipc: host
+    volumes:
+      - ${HUGGING_FACE_CACHE_DIR}:/root/.cache/huggingface
+    command: >
+      --port 8000
+      --model Qwen/Qwen3-32B-AWQ
+      --max-model-len 6000
+      --gpu-memory-utilization 0.90
+      --enable-auto-tool-choice
+      --tool-call-parser hermes
+      --tensor-parallel-size 1
+      --max-num-seqs 1
+      --reasoning-parser deepseek_r1
+
+  # Uncomment if you need LanguageTool
+  # languagetool:
+  #   hostname: languagetool
+  #   build:
+  #     context: ./docker/languagetool
+  #     dockerfile: Dockerfile
+  #   container_name: languagetool
+  #   ports:
+  #     - ${LANGUAGE_TOOL_PORT}:8010
+  #   environment:
+  #     - langtool_languageModel=/languagetool/.cache/ngrams
+  #     - Java_Xms=512m
+  #     - Java_Xmx=2g
+  #   volumes:
+  #     - ${LANGUAGE_TOOL_CACHE_DIR}:/languagetool/.cache/ngrams
