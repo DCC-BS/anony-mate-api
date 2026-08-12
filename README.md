@@ -17,7 +17,7 @@ Tool for anonymize textTool for anonymize text
 
 [MIT](LICENSE) © Data Competence Center Basel-Stadt
 
-<a href="https://www.bs.ch/schwerpunkte/daten/databs/schwerpunkte/datenwissenschaften-und-ki"><img src="./_imgs/databs_log.png" alt="DCC Logo" width="200" /></a>
+<a href="https://www.bs.ch/schwerpunkte/daten/databs/schwerpunkte/datenwissenschaften-und-ki"><img src="https://github.com/DCC-BS/.github/blob/main/_imgs/databs_log.png?raw=true" alt="DCC Logo" width="200" /></a>
 
 Datenwissenschaften und KI <br>
 Developed with ❤️ by DCC - Data Competence Center
