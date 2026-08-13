@@ -8,7 +8,7 @@ from dcc_backend_common.config.app_config import LlmConfig
 from pydantic import Field
 
 
-class Configuration(LlmConfig):
+class AppConfig(LlmConfig):
     """Application configuration loaded from environment variables."""
 
     client_url: str = Field(description="The URL for client application", default="http://localhost:3000")
@@ -22,8 +22,7 @@ class Configuration(LlmConfig):
 
     @classmethod
     @override
-    def from_env(cls) -> "Configuration":
-
+    def from_env(cls) -> AppConfig:
         llm_api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
         if not llm_api_key:
             raise ValueError("LLM_API_KEY environment variable must be set")

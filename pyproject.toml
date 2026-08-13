@@ -12,18 +12,13 @@ requires-python = ">=3.13, <3.14"
 license = "MIT"
 license-files = ["LICEN[CS]E*"]
 dependencies = [
-
-    "dcc-backend-common[pydantic_ai]>=0.1.4",
-
+    "dcc-backend-common[pydantic_ai]>=0.1.19",
     "dependency-injector>=4.48.3",
     "fastapi[standard]>=0.115.0",
     "structlog>=25.1.0",
     "python-dotenv>=1.0.1",
     "returns>=0.26.0",
-
     "logfire>=4.22.0",
-
-
 ]
 
 [project.urls]
@@ -146,5 +141,3 @@ line-ending = "auto"
 [tool.ruff.lint.isort]
 combine-as-imports = true
 force-wrap-aliases = true
-
-
