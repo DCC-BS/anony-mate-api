@@ -1,6 +1,6 @@
 services:
   vllm:
-    image: vllm/vllm-openai:v0.25.1
+    image: vllm/vllm-openai:v0.26.0
     container_name: vllm_anony_mate_backend
     ports:
       - ${LLM_API_PORT}:8000
