@@ -17,8 +17,7 @@ class AppConfig(LlmConfig):
         description="The URL for LLM health check API", default="http://localhost:8001/health"
     )
 
-    # Example configuration field (remove in production)
-    example: str = Field(description="Example configuration value", default="default value")
+    glen_api_url: str = Field(description="The Glen base API url")
 
     @classmethod
     @override
@@ -34,6 +33,7 @@ class AppConfig(LlmConfig):
             llm_model=get_env_or_throw("LLM_MODEL"),
             llm_health_check_url=get_env_or_throw("LLM_HEALTH_CHECK_URL"),
             environment=os.getenv("ENVIRONMENT", "production"),
+            glen_api_url=get_env_or_throw("GLEN_API_URL"),
         )
 
     @override
@@ -45,6 +45,7 @@ class AppConfig(LlmConfig):
             llm_url={self.llm_url},
             llm_model={self.llm_model},
             llm_health_check_url={self.llm_health_check_url},
-            environment={self.environment}
+            environment={self.environment},
+            glen_api_url={self.glen_api_url}
         )
         """

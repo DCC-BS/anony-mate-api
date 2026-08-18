@@ -12,11 +12,11 @@ requires-python = ">=3.14, <3.15"
 license = "MIT"
 license-files = ["LICEN[CS]E*"]
 dependencies = [
-    "dcc-backend-common[pydantic_ai]>=0.1.19",
+    "dcc-backend-common[pydantic_ai]>=0.1.21",
     "dependency-injector>=4.48.3",
     "fastapi[standard]>=0.115.0",
     "structlog>=25.1.0",
-    "python-dotenv>=1.0.1",
+    "python-dotenv>=1.2.2",
     "returns>=0.26.0",
     "logfire>=4.22.0",
 ]
@@ -26,34 +26,14 @@ Homepage = "https://DCC-BS.github.io/anony-mate-api/"
 Repository = "https://github.com/DCC-BS/anony-mate-api"
 Documentation = "https://DCC-BS.github.io/anony-mate-api/"
 
-[project.optional-dependencies]
-dev = [
-    "coverage>=7.6.12",
-    "pytest>=8.3.5",
-    "pytest-mock>=3.14.0",
-    "pre-commit>=2.20.0",
-    "tox-uv>=1.11.3",
-    "deptry>=0.22.0",
-    "pytest-cov>=6.0.0",
-    "ruff>=0.14.13",
-    "version-pioneer>=0.0.13",
-    "ty>=0.0.12",
-
-]
-
 [dependency-groups]
 dev = [
-    "coverage>=7.6.12",
     "pytest>=8.3.5",
     "pytest-mock>=3.14.0",
-    "pre-commit>=2.20.0",
+    "pre-commit>=4.6.2",
     "tox-uv>=1.11.3",
-    "deptry>=0.22.0",
-    "pytest-cov>=6.0.0",
-    "ruff>=0.14.13",
-    "version-pioneer>=0.0.13",
-    "ty>=0.0.12",
-
+    "ruff>=0.16.2",
+    "ty>=0.0.70",
 ]
 
 [build-system]

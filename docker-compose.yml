@@ -1,29 +1,33 @@
 services:
-  vllm:
-    image: vllm/vllm-openai:v0.26.0
-    container_name: vllm_anony_mate_backend
-    ports:
-      - ${LLM_API_PORT}:8000
-    environment:
-      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
-    runtime: nvidia
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ["0"]
-              capabilities: [gpu]
-    ipc: host
-    volumes:
-      - ${HUGGING_FACE_CACHE_DIR}:/root/.cache/huggingface
-    command: >
-      --port 8000
-      --model Qwen/Qwen3-32B-AWQ
-      --max-model-len 6000
-      --gpu-memory-utilization 0.90
-      --enable-auto-tool-choice
-      --tool-call-parser hermes
-      --tensor-parallel-size 1
-      --max-num-seqs 1
-      --reasoning-parser deepseek_r1
+  gliner-api:
+      image: ghcr.io/dcc-bs/dcc-gliner-api:latest
+      ports:
+        - "8081:8000"
+  # vllm:
+  #   image: vllm/vllm-openai:v0.26.0
+  #   container_name: vllm_anony_mate_backend
+  #   ports:
+  #     - ${LLM_API_PORT}:8000
+  #   environment:
+  #     - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+  #   runtime: nvidia
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             device_ids: ["0"]
+  #             capabilities: [gpu]
+  #   ipc: host
+  #   volumes:
+  #     - ${HUGGING_FACE_CACHE_DIR}:/root/.cache/huggingface
+  #   command: >
+  #     --port 8000
+  #     --model Qwen/Qwen3-32B-AWQ
+  #     --max-model-len 6000
+  #     --gpu-memory-utilization 0.90
+  #     --enable-auto-tool-choice
+  #     --tool-call-parser hermes
+  #     --tensor-parallel-size 1
+  #     --max-num-seqs 1
+  #     --reasoning-parser deepseek_r1

@@ -67,7 +67,6 @@ run = [
     "varlock scan",
 ]
 
-
 # ── Testing ───────────────────────────────────────────────────────────────────
 
 [tasks."test:unit"]
@@ -79,8 +78,6 @@ run = "uv run python -m pytest --doctest-modules"
 [tasks.ci]
 description = "Run all CI checks (lock, format, lint, types, tests)"
 depends = ["ci-check", "test:unit"]
-
-
 
 # ── Docker ────────────────────────────────────────────────────────────────────
 
