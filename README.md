@@ -1,4 +1,4 @@
-# anony-mate-backend
+# anony-mate-api
 
 Tool for anonymize textTool for anonymize text
 

@@ -124,7 +124,7 @@ wheels = [
 ]
 
 [[package]]
-name = "anony-mate-backend"
+name = "anony-mate-api"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [

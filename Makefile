@@ -14,7 +14,7 @@ check: ## Run code quality tools.
 	@uv run ruff check --fix
 
 	@echo "🚀 Static type checking: Running ty"
-	@uv run ty check ./src/anony_mate_backend
+	@uv run ty check ./src/anony_mate_api
 
 	@echo "🚀 Scanning for secrets: Running varlock"
 	@varlock scan
@@ -49,12 +49,12 @@ docker-logs:
 .PHONY: run
 run: ## Run the application
 	@echo "🚀 Running the application"
-	./scripts/run-varlock.sh run -- uv run fastapi run ./src/anony_mate_backend/app.py --port 8000
+	./scripts/run-varlock.sh run -- uv run fastapi run ./src/anony_mate_api/app.py --port 8000
 
 .PHONY: dev
 dev: ## Run the application in development mode
 	@echo "🚀 Running the application in development mode"
-	./scripts/run-varlock.sh run -- uv run fastapi dev ./src/anony_mate_backend/app.py --port 8000
+	./scripts/run-varlock.sh run -- uv run fastapi dev ./src/anony_mate_api/app.py --port 8000
 
 .PHONY: clean-build
 clean-build: ## Clean build artifacts

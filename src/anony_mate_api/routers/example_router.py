@@ -5,8 +5,8 @@ from dcc_backend_common.logger import get_logger
 from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Request
 
-from anony_mate_backend.container import Container
-from anony_mate_backend.utils.app_config import AppConfig
+from anony_mate_api.container import Container
+from anony_mate_api.utils.app_config import AppConfig
 
 logger = get_logger("example_router")
 

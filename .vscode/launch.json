@@ -11,7 +11,7 @@
             "module": "fastapi",
             "args": [
                 "dev",
-                "./src/anony_mate_backend/app.py"
+                "./src/anony_mate_api/app.py"
             ],
             "jinja": true
         },

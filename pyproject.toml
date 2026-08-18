@@ -1,5 +1,5 @@
 [project]
-name = "anony-mate-backend"
+name = "anony-mate-api"
 version = "0.0.1"
 description = "Tool for anonymize textTool for anonymize text"
 authors = [
@@ -22,9 +22,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://DCC-BS.github.io/anony-mate-backend/"
-Repository = "https://github.com/DCC-BS/anony-mate-backend"
-Documentation = "https://DCC-BS.github.io/anony-mate-backend/"
+Homepage = "https://DCC-BS.github.io/anony-mate-api/"
+Repository = "https://github.com/DCC-BS/anony-mate-api"
+Documentation = "https://DCC-BS.github.io/anony-mate-api/"
 
 [project.optional-dependencies]
 dev = [
@@ -64,7 +64,7 @@ build-backend = "hatchling.build"
 source = "version-pioneer"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/anony_mate_backend"]
+packages = ["src/anony_mate_api"]
 
 [tool.uv.sources]
 dcc-backend-common = { git = "https://github.com/DCC-BS/backend-common" }

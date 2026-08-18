@@ -36,13 +36,13 @@ run = "varlock load"
 description = "Run the FastAPI dev server with auto-reload"
 alias = "d"
 depends = ["env-check"]
-run = "varlock run -- uv run fastapi dev ./src/anony_mate_backend/app.py --port 8000"
+run = "varlock run -- uv run fastapi dev ./src/anony_mate_api/app.py --port 8000"
 
 [tasks.run]
 description = "Run the production ASGI server (uvicorn)"
 alias = "r"
 depends = ["env-check"]
-run = "varlock run -- uv run uvicorn anony_mate_backend.app:app --port 8000 --no-access-log"
+run = "varlock run -- uv run uvicorn anony_mate_api.app:app --port 8000 --no-access-log"
 
 # ── Quality ───────────────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ run = [
     "uv lock --locked",
     "uv run ruff format",
     "uv run ruff check --fix",
-    "uv run ty check ./src/anony_mate_backend",
+    "uv run ty check ./src/anony_mate_api",
     "varlock scan",
 ]
 
@@ -63,10 +63,9 @@ run = [
     "uv lock --locked",
     "uv run ruff format --check",
     "uv run ruff check",
-    "uv run ty check ./src/anony_mate_backend",
+    "uv run ty check ./src/anony_mate_api",
     "varlock scan",
 ]
-
 
 
 # ── Testing ───────────────────────────────────────────────────────────────────
@@ -111,9 +110,3 @@ run = "uvx --from build pyproject-build --installer uv"
 [tasks."cleanup:build"]
 description = "Remove build artifacts"
 run = "uv run python -c \"import shutil, os; shutil.rmtree('dist') if os.path.exists('dist') else None\""
-
-# ── Environment ───────────────────────────────────────────────────────────────
-
-[tasks."env-example"]
-description = "Generate .env.example from the Configuration model"
-run = "uv run -m dcc_backend_common.config.generate_env_example src.anony_mate_backend.utils.configuration Configuration"

@@ -10,8 +10,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from structlog.stdlib import BoundLogger
 
-from anony_mate_backend.container import Container
-from anony_mate_backend.utils.app_config import AppConfig
+from anony_mate_api.container import Container
+from anony_mate_api.utils.app_config import AppConfig
 
 config = {}  # TODO load your config here
 
@@ -37,7 +37,7 @@ def _build_fastapi_app() -> FastAPI:
     Instantiate the FastAPI application with metadata and lifespan.
     """
     app = FastAPI(
-        title="anony-mate-backend",
+        title="anony-mate-api",
         description="Tool for anonymize textTool for anonymize text",
         version="0.1.0",
         lifespan=_lifespan,
@@ -115,7 +115,7 @@ def create_app() -> FastAPI:
     init_logger(app_name="AnonyMate")
 
     logger: BoundLogger = get_logger("app")
-    logger.info("Starting anony-mate-backend API application")
+    logger.info("Starting anony-mate-api API application")
 
     app = _build_fastapi_app()
 
