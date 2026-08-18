@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 from typing import override
 
@@ -17,7 +15,9 @@ class AppConfig(LlmConfig):
         description="The URL for LLM health check API", default="http://localhost:8001/health"
     )
 
-    glen_api_url: str = Field(description="The Glen base API url")
+    gliner_api_base_url: str = Field(description="The Glen base API url")
+    gliner_api_key: str = Field(description="The Gliner API key")
+    gliner_http_timeout_seconds: float = Field(description="The HTTP timeout for Gliner API calls", default=30.0)
 
     @classmethod
     @override
@@ -33,7 +33,9 @@ class AppConfig(LlmConfig):
             llm_model=get_env_or_throw("LLM_MODEL"),
             llm_health_check_url=get_env_or_throw("LLM_HEALTH_CHECK_URL"),
             environment=os.getenv("ENVIRONMENT", "production"),
-            glen_api_url=get_env_or_throw("GLEN_API_URL"),
+            gliner_api_base_url=get_env_or_throw("GLINER_API_BASE_URL"),
+            gliner_http_timeout_seconds=float(os.getenv("GLINER_HTTP_TIMEOUT_SECONDS", 30.0)),
+            gliner_api_key=get_env_or_throw("GLINER_API_KEY"),
         )
 
     @override
@@ -46,6 +48,8 @@ class AppConfig(LlmConfig):
             llm_model={self.llm_model},
             llm_health_check_url={self.llm_health_check_url},
             environment={self.environment},
-            glen_api_url={self.glen_api_url}
+            gliner_api_base_url={self.gliner_api_base_url},
+            glen_http_timeout_seconds={self.gliner_http_timeout_seconds},
+            gliner_api_key={log_secret(self.gliner_api_key)},
         )
         """

@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from structlog.stdlib import BoundLogger
 
 from anony_mate_api.container import Container
+from anony_mate_api.routers import redact_router
 from anony_mate_api.utils.app_config import AppConfig
 
 config = {}  # TODO load your config here
@@ -27,8 +28,8 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger = get_logger("app")
     logger.info("Shutting down application, closing resources...")
     container: Container = app.state.container
-    whisper_service = container.whisper_service()
-    await whisper_service.aclose()
+    redact_service = container.redact_service()
+    await redact_service.aclose()
     logger.info("Resources closed successfully")
 
 
@@ -68,7 +69,7 @@ def _configure_container(app: FastAPI, logger: BoundLogger) -> Container:
     """
     logger.debug("Configuring dependency injection container")
     container = Container()
-    # container.wire(modules=[transcribe_route, summarize_route])
+    container.wire(modules=[redact_router])
     container.check_dependencies()
     logger.debug("Dependency injection configured")
     app.state.container = container
@@ -80,7 +81,7 @@ def _register_routes(app: FastAPI, logger: BoundLogger) -> None:
     Register API routers.
     """
     logger.debug("Registering API routers")
-    # app.include_router(summarize_route.create_router())
+    app.include_router(redact_router.create_router())
     logger.debug("All routers registered")
 
 
