@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from structlog.stdlib import BoundLogger
 
 from anony_mate_api.container import Container
-from anony_mate_api.routers import entity_types_router, redact_router
+from anony_mate_api.routers import blacklist_router, entity_types_router, redact_router
 from anony_mate_api.utils.app_config import AppConfig
 
 config = {}  # TODO load your config here
@@ -83,6 +83,7 @@ def _register_routes(app: FastAPI, logger: BoundLogger) -> None:
     logger.debug("Registering API routers")
     app.include_router(redact_router.create_router())
     app.include_router(entity_types_router.create_router())
+    app.include_router(blacklist_router.create_router())
     logger.debug("All routers registered")
 
 

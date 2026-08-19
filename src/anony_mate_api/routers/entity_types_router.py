@@ -15,14 +15,29 @@ class EntityType(Enum):
     legal = "legal"
 
 
+ENTITY_TYPES: dict[EntityType, dict[str, str]] = {
+    EntityType.default: {
+        "person": "A person, can be first name, last name or lastname and firstname",
+        "location": "A location",
+    },
+    EntityType.legal: {
+        "person": "A person, can be first name, last name or lastname and firstname",
+        "location": "A location",
+        "organization": "A company, institution or other organized group",
+        "date": "A calendar date",
+        "phone_number": "A telephone number",
+    },
+}
+
+
 @inject
 def create_router(redact_service: RedactService = Provide[Container.redact_service]) -> APIRouter:
     logger.info("Creating redact router")
     router: APIRouter = APIRouter(prefix="/entity_types")
 
-    @router.post("/{type_name}")
+    @router.get("/{type_name}")
     async def redact(type_name: EntityType) -> dict[str, str]:
-        return {"person": "A person, can be first name, last name or lastname and firstname", "location": "A location"}
+        return ENTITY_TYPES[type_name]
 
     logger.info("entity types router configured")
 

@@ -3,7 +3,7 @@ from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter
 
 from anony_mate_api.container import Container
-from anony_mate_api.models.redact_models import RedactInput, RedactOutput
+from anony_mate_api.models.redact_models import RedactBatchInput, RedactInput, RedactOutput
 from anony_mate_api.services.redact_service import RedactService
 
 logger = get_logger("redact_router")
@@ -15,8 +15,12 @@ def create_router(redact_service: RedactService = Provide[Container.redact_servi
     router: APIRouter = APIRouter(prefix="/redact")
 
     @router.post("/")
-    async def redact(input: RedactInput) -> RedactOutput:
-        return await redact_service.redact(input)
+    async def redact(payload: RedactInput) -> RedactOutput:
+        return await redact_service.redact(payload)
+
+    @router.post("/batch")
+    async def redact_batch(payload: RedactBatchInput) -> list[RedactOutput]:
+        return await redact_service.redact_batch(payload)
 
     logger.info("redact router configured")
     return router

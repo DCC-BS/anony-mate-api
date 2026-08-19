@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from anony_mate_api.models.error_codes import REDACT_ERROR
 from anony_mate_api.models.gliner_models import GlinerInput, GlinerResponse
-from anony_mate_api.models.redact_models import Entity, RedactInput, RedactOutput
+from anony_mate_api.models.redact_models import Entity, RedactBatchInput, RedactInput, RedactOutput
 from anony_mate_api.utils import AppConfig
 
 logger = get_logger("redact_service")
@@ -31,6 +31,18 @@ def _create_entities_dict(gliner_response: GlinerResponse) -> dict[str, list[Ent
                 )
             )
     return entity_dict
+
+
+def _filter_blacklisted(entities: dict[str, list[Entity]], blacklist: list[str]) -> dict[str, list[Entity]]:
+    if not blacklist:
+        return entities
+    lowered_blacklist = [entry.lower() for entry in blacklist]
+    return {
+        label: [
+            entity for entity in entity_list if not any(entry in entity.text.lower() for entry in lowered_blacklist)
+        ]
+        for label, entity_list in entities.items()
+    }
 
 
 def _redact_text(text: str, entities: dict[str, list[Entity]], replacement_fn: Callable[[Entity], str]):
@@ -69,16 +81,13 @@ class RedactService:
     async def close(self) -> None:
         await self.client.aclose()
 
-    async def _extract_entities(self, input: GlinerInput, **kwargs: Any) -> GlinerResponse:
-        url = "/extract_entities"
-        headers = {"Authorization": f"Bearer {self.config.gliner_api_key}", **kwargs.pop("headers", {})}
-        body = input.model_dump()
+    async def _request(self, url: str, body: dict[str, Any]) -> httpx.Response:
+        headers = {"Authorization": f"Bearer {self.config.gliner_api_key}"}
         try:
             response = await self.client.request("POST", url, headers=headers, json=body)
             response.raise_for_status()
-            return GlinerResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
-            logger.error(
+            logger.exception(
                 "Gliner API HTTP error",
                 url=f"{self.client.base_url}{url}",
                 status_code=e.response.status_code,
@@ -92,36 +101,70 @@ class RedactService:
         except httpx.TimeoutException:
             raise
         except httpx.RequestError as e:
-            logger.error("Gliner api connection error", url=f"{self.client.base_url}{url}", error=str(e))
+            logger.exception("Gliner api connection error", url=f"{self.client.base_url}{url}", error=str(e))
             raise ApiErrorException({
                 "errorId": REDACT_ERROR,
                 "status": status.HTTP_500_INTERNAL_SERVER_ERROR,
                 "debugMessage": f"Gliner connection error: {e!s}",
             }) from e
         except ValidationError as e:
-            logger.error("Validation error from gliner", url=f"{self.client.base_url}{url}", error=str(e))
+            logger.exception("Validation error from gliner", url=f"{self.client.base_url}{url}", error=str(e))
             raise ApiErrorException({
                 "errorId": REDACT_ERROR,
                 "status": status.HTTP_500_INTERNAL_SERVER_ERROR,
                 "debugMessage": f"Validation error: {e!s}",
             }) from e
+        else:
+            return response
 
-    async def redact(self, input: RedactInput) -> RedactOutput:
+    async def _extract_entities(self, payload: GlinerInput) -> GlinerResponse:
+        response = await self._request("/extract_entities", payload.model_dump())
+        return GlinerResponse.model_validate(response.json())
+
+    async def _extract_entities_batch(
+        self, texts: list[str], entity_types: Any, threshold: float
+    ) -> list[GlinerResponse]:
+        body = {
+            "entity_types": entity_types,
+            "include_confidence": True,
+            "include_spans": True,
+            "texts": texts,
+            "threshold": threshold,
+        }
+        response = await self._request("/batch_extract_entities", body)
+        return [GlinerResponse.model_validate(item) for item in response.json()]
+
+    def _redact_single(
+        self,
+        text: str,
+        entity_dict: dict[str, list[Entity]],
+        blacklist: list[str],
+    ) -> RedactOutput:
+        entity_dict = _filter_blacklisted(entity_dict, blacklist)
+        redacted_text = _redact_text(
+            text,
+            entity_dict,
+            replacement_fn=lambda e: f"{e.label}:{e.id}",
+        )
+        return RedactOutput(text=redacted_text, entities=entity_dict)
+
+    async def redact(self, payload: RedactInput) -> RedactOutput:
         gliner_input = GlinerInput(
-            entity_types=input.labels,
+            entity_types=payload.entity_types,
             include_confidence=True,
             include_spans=True,
-            text=input.text,
-            threshold=input.threshold,
+            text=payload.text,
+            threshold=payload.threshold,
         )
 
         response = await self._extract_entities(gliner_input)
         entity_dict = _create_entities_dict(response)
 
-        redacted_text = _redact_text(
-            input.text,
-            entity_dict,
-            replacement_fn=lambda e: f"{e.label}:{e.id}",
-        )
+        return self._redact_single(payload.text, entity_dict, payload.blacklist)
 
-        return RedactOutput(text=redacted_text, entities=entity_dict)
+    async def redact_batch(self, payload: RedactBatchInput) -> list[RedactOutput]:
+        responses = await self._extract_entities_batch(payload.texts, payload.entity_types, payload.threshold)
+        return [
+            self._redact_single(text, _create_entities_dict(response), payload.blacklist)
+            for text, response in zip(payload.texts, responses, strict=True)
+        ]

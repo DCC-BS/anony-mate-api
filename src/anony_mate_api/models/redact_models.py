@@ -3,8 +3,18 @@ from pydantic import BaseModel, Field
 
 class RedactInput(BaseModel):
     text: str = Field(description="Text to redact")
-    labels: list[str] | dict[str, str] = Field(
-        description="Labels to redact either a list of labels or a dict with the name of the label as key and the description of the label as value",
+    entity_types: list[str] | dict[str, str] = Field(
+        description="Enity types to redact either a list of labels or a dict with the name of the label as key and the description of the label as value",
+        default=[],
+    )
+    threshold: float = Field(description="Confidence threshold for redaction", default=0.8)
+    blacklist: list[str] = Field(description="Blacklist of words to avoid redaction", default=[])
+
+
+class RedactBatchInput(BaseModel):
+    texts: list[str] = Field(description="Texts to redact, one output returned per text in the same order")
+    entity_types: list[str] | dict[str, str] = Field(
+        description="Enity types to redact either a list of labels or a dict with the name of the label as key and the description of the label as value",
         default=[],
     )
     threshold: float = Field(description="Confidence threshold for redaction", default=0.8)

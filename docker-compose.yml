@@ -3,6 +3,17 @@ services:
       image: ghcr.io/dcc-bs/dcc-gliner-api:latest
       ports:
         - "8081:8000"
+  docling-serve:
+      image: ghcr.io/dcc-bs/dcc-docling-serve-cpu:v1.30.0
+      container_name: docling-serve-anony-mate
+      ports:
+          - ${DOCLING_API_PORT:-5001}:5001
+      environment:
+          - DOCLING_MODELS_PATH=/models
+          - DOCLING_CONFIG_FILE=/app/docling_config.json
+          - DOCLING_SERVE_ENABLE_UI=true
+      volumes:
+          - "${HOME:-/root}/.cache/docling:/models"
   # vllm:
   #   image: vllm/vllm-openai:v0.26.0
   #   container_name: vllm_anony_mate_backend

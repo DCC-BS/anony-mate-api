@@ -21,7 +21,7 @@ class AppConfig(LlmConfig):
 
     @classmethod
     @override
-    def from_env(cls) -> AppConfig:
+    def from_env(cls) -> "AppConfig":
         llm_api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
         if not llm_api_key:
             raise ValueError("LLM_API_KEY environment variable must be set")
