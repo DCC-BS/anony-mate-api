@@ -29,7 +29,9 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info("Shutting down application, closing resources...")
     container: Container = app.state.container
     redact_service = container.redact_service()
-    await redact_service.aclose()
+    document_conversion_service = container.document_conversion_service()
+    await redact_service.close()
+    await document_conversion_service.close()
     logger.info("Resources closed successfully")
 
 

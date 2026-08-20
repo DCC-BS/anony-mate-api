@@ -19,6 +19,23 @@ class AppConfig(LlmConfig):
     gliner_api_key: str = Field(description="The Gliner API key")
     gliner_http_timeout_seconds: float = Field(description="The HTTP timeout for Gliner API calls", default=30.0)
 
+    docling_url: str = Field(description="The URL for Docling service", default="http://localhost:5001/v1")
+    docling_api_key: str = Field(
+        description="The API key for Docling service, set it to none if none is required", default="none"
+    )
+    docling_poll_interval_seconds: float = Field(
+        description="Interval in seconds between Docling task status polling requests",
+        default=1.0,
+    )
+    docling_conversion_timeout_seconds: float = Field(
+        description="Maximum seconds to wait for Docling conversion task to complete",
+        default=300.0,
+    )
+    docling_http_timeout_seconds: float = Field(
+        description="Per-request HTTP timeout in seconds for Docling API calls",
+        default=30.0,
+    )
+
     @classmethod
     @override
     def from_env(cls) -> "AppConfig":
@@ -36,6 +53,11 @@ class AppConfig(LlmConfig):
             gliner_api_base_url=get_env_or_throw("GLINER_API_BASE_URL"),
             gliner_http_timeout_seconds=float(os.getenv("GLINER_HTTP_TIMEOUT_SECONDS", 30.0)),
             gliner_api_key=get_env_or_throw("GLINER_API_KEY"),
+            docling_url=get_env_or_throw("DOCLING_URL"),
+            docling_api_key=get_env_or_throw("DOCLING_API_KEY"),
+            docling_poll_interval_seconds=float(os.getenv("DOCLING_POLL_INTERVAL_SECONDS", "1.0")),
+            docling_conversion_timeout_seconds=float(os.getenv("DOCLING_CONVERSION_TIMEOUT_SECONDS", "300.0")),
+            docling_http_timeout_seconds=float(os.getenv("DOCLING_HTTP_TIMEOUT_SECONDS", "30.0")),
         )
 
     @override
@@ -51,5 +73,10 @@ class AppConfig(LlmConfig):
             gliner_api_base_url={self.gliner_api_base_url},
             glen_http_timeout_seconds={self.gliner_http_timeout_seconds},
             gliner_api_key={log_secret(self.gliner_api_key)},
+            docling_url={self.docling_url},
+            docling_api_key={log_secret(self.docling_api_key)},
+            docling_poll_interval_seconds={self.docling_poll_interval_seconds},
+            docling_conversion_timeout_seconds={self.docling_conversion_timeout_seconds},
+            docling_http_timeout_seconds={self.docling_http_timeout_seconds},
         )
         """

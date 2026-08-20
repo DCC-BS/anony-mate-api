@@ -69,15 +69,6 @@ class RedactService:
         self.config = config
         self.client = httpx.AsyncClient(base_url=config.gliner_api_base_url, timeout=config.gliner_http_timeout_seconds)
 
-    async def __aenter__(self) -> "RedactService":
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        await self.client.aclose()
-
-    async def aclose(self) -> None:
-        await self.client.aclose()
-
     async def close(self) -> None:
         await self.client.aclose()
 
