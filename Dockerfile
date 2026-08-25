@@ -1,11 +1,13 @@
 # Stage 1: Builder
-FROM python:3.13-alpine AS builder
+FROM python:3.14-alpine AS builder
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 ENV APP_MODE=build
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 ENV UV_HTTP_TIMEOUT=120
+# Fail fast instead of silently downloading a uv-managed python that won't be copied to the runtime stage
+ENV UV_PYTHON_DOWNLOADS=never
 
 WORKDIR /app
 
@@ -27,7 +29,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
 # Stage 2: Runtime
-FROM python:3.13-alpine
+FROM python:3.14-alpine
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
