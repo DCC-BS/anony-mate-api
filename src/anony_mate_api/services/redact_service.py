@@ -110,6 +110,8 @@ class RedactService:
 
     async def _extract_entities(self, payload: GlinerInput) -> GlinerResponse:
         response = await self._request("/extract_entities", payload.model_dump())
+
+        print(response.json())
         return GlinerResponse.model_validate(response.json())
 
     async def _extract_entities_batch(

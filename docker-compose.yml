@@ -2,7 +2,7 @@ services:
   gliner-api:
       image: ghcr.io/dcc-bs/dcc-gliner-api:latest
       ports:
-        - "8081:8000"
+        - "${GLINER_PORT:-8081}:8000"
   docling-serve:
       image: ghcr.io/dcc-bs/dcc-docling-serve-cpu:v1.30.0
       container_name: docling-serve-anony-mate

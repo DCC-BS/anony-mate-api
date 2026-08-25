@@ -18,5 +18,12 @@ class GlinerInput(BaseModel):
     )
 
 
+class GlinerProgress(BaseModel):
+    current: int
+    length: int
+    progress: float
+
+
 class GlinerResponse(BaseModel):
     entities: dict[str, list[GlinerEntity]] = Field(description="The extracted entities grouped by entity type.")
+    progress: GlinerProgress
