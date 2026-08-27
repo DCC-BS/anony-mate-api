@@ -1,8 +1,10 @@
 import asyncio
+import json
 import time
 from collections import defaultdict
 from collections.abc import Callable
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from dcc_backend_common.fastapi_error_handling import ApiErrorException
@@ -17,8 +19,11 @@ from anony_mate_api.utils import AppConfig
 
 logger = get_logger("redact_service")
 
-#: Gliner reports progress per chunk window, so polling faster adds no detail.
-GLINER_POLL_INTERVAL_SECONDS = 1.0
+#: A scan runs for minutes, so polling every second only adds request noise.
+GLINER_POLL_INTERVAL_SECONDS = 10.0
+
+#: Echoed in Gliner's log, so one call can be traced across both services.
+CORRELATION_HEADER = "X-Correlation-Id"
 
 
 def _create_entities_dict(gliner_response: GlinerResponse) -> dict[str, list[Entity]]:
@@ -83,16 +88,38 @@ class RedactService:
         body: dict[str, Any] | None = None,
         method: str = "POST",
     ) -> httpx.Response:
-        headers = {"Authorization": f"Bearer {self.config.gliner_api_key}"}
+        # Sent along so the same call can be found in Gliner's log. If it never
+        # appears there, something between the two rejected the request.
+        correlation_id = uuid4().hex[:12]
+        headers = {
+            "Authorization": f"Bearer {self.config.gliner_api_key}",
+            CORRELATION_HEADER: correlation_id,
+        }
+        payload = json.dumps(body).encode() if body is not None else b""
+        logger.debug(
+            "Calling Gliner",
+            base_url=str(self.client.base_url),
+            path=url,
+            method=method,
+            request_bytes=len(payload),
+            correlation_id=correlation_id,
+        )
         try:
             response = await self.client.request(method, url, headers=headers, json=body)
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
+            content_type = e.response.headers.get("content-type", "")
             logger.exception(
                 "Gliner API HTTP error",
-                url=f"{self.client.base_url}{url.lstrip(chr(47))}",
+                url=str(e.request.url),
                 status_code=e.response.status_code,
-                body=e.response.text,
+                # A gateway answers with its own HTML page; Gliner answers JSON.
+                # That tells you which of the two rejected the call.
+                responded_by="gateway" if "html" in content_type else "gliner",
+                content_type=content_type,
+                request_bytes=len(payload),
+                correlation_id=correlation_id,
+                body=e.response.text[:2000],
             )
             raise ApiErrorException({
                 "errorId": REDACT_ERROR,
@@ -102,8 +129,10 @@ class RedactService:
         except httpx.TimeoutException as e:
             logger.exception(
                 "Gliner API timed out",
-                url=f"{self.client.base_url}{url.lstrip(chr(47))}",
+                url=str(e.request.url),
                 timeout=self.config.gliner_http_timeout_seconds,
+                request_bytes=len(payload),
+                correlation_id=correlation_id,
             )
             raise ApiErrorException({
                 "errorId": REDACT_TIMEOUT,
@@ -144,10 +173,15 @@ class RedactService:
         Submitting and polling keeps every individual request short, so a long
         scan cannot be cut off by a proxy the way one held-open request is.
         """
+        logger.info("Submitting extraction to Gliner", text_chars=len(payload.text))
+
         accepted = await self._request("/extract_entities/async", payload.model_dump())
         task_id = accepted.json()["task_id"]
+        logger.debug("Gliner accepted extraction", gliner_task_id=task_id)
 
-        deadline = time.monotonic() + self.config.gliner_http_timeout_seconds
+        # The scan itself may take minutes; each poll is its own short request,
+        # so this budget is about the whole job, not one HTTP call.
+        deadline = time.monotonic() + self.config.gliner_task_timeout_seconds
         while True:
             state = (await self._get(f"/task/{task_id}")).json()
             status_value = state.get("status")
@@ -167,7 +201,9 @@ class RedactService:
                 raise ApiErrorException({
                     "errorId": REDACT_TIMEOUT,
                     "status": status.HTTP_504_GATEWAY_TIMEOUT,
-                    "debugMessage": "Gliner task did not finish in time",
+                    "debugMessage": (
+                        f"Gliner task did not finish within {self.config.gliner_task_timeout_seconds:.0f}s"
+                    ),
                 })
 
             await asyncio.sleep(GLINER_POLL_INTERVAL_SECONDS)

@@ -17,6 +17,10 @@ class AppConfig(LlmConfig):
 
     gliner_api_base_url: str = Field(description="The Glen base API url")
     gliner_api_key: str = Field(description="The Gliner API key")
+    gliner_task_timeout_seconds: float = Field(
+        description="Maximum seconds to wait for a Gliner extraction task to finish; a long document scans for minutes",
+        default=3600.0,
+    )
     gliner_http_timeout_seconds: float = Field(
         description="The HTTP timeout for Gliner API calls; long documents take minutes to scan",
         default=600.0,
@@ -28,7 +32,7 @@ class AppConfig(LlmConfig):
     )
     docling_poll_interval_seconds: float = Field(
         description="Interval in seconds between Docling task status polling requests",
-        default=1.0,
+        default=10.0,
     )
     docling_conversion_timeout_seconds: float = Field(
         description="Maximum seconds to wait for Docling conversion task to complete; large scanned PDFs take minutes",
@@ -54,6 +58,7 @@ class AppConfig(LlmConfig):
             llm_health_check_url=get_env_or_throw("LLM_HEALTH_CHECK_URL"),
             environment=os.getenv("ENVIRONMENT", "production"),
             gliner_api_base_url=get_env_or_throw("GLINER_API_BASE_URL"),
+            gliner_task_timeout_seconds=float(os.getenv("GLINER_TASK_TIMEOUT_SECONDS", "3600.0")),
             gliner_http_timeout_seconds=float(os.getenv("GLINER_HTTP_TIMEOUT_SECONDS", "600.0")),
             gliner_api_key=get_env_or_throw("GLINER_API_KEY"),
             # TEMPORARY: DOCLING_URL/DOCLING_API_KEY are not declared in
@@ -62,7 +67,7 @@ class AppConfig(LlmConfig):
             # declares them; then restore get_env_or_throw for both.
             docling_url=os.getenv("DOCLING_URL", "http://localhost:5001/v1"),
             docling_api_key=os.getenv("DOCLING_API_KEY", "none"),
-            docling_poll_interval_seconds=float(os.getenv("DOCLING_POLL_INTERVAL_SECONDS", "1.0")),
+            docling_poll_interval_seconds=float(os.getenv("DOCLING_POLL_INTERVAL_SECONDS", "10.0")),
             docling_conversion_timeout_seconds=float(os.getenv("DOCLING_CONVERSION_TIMEOUT_SECONDS", "1800.0")),
             docling_http_timeout_seconds=float(os.getenv("DOCLING_HTTP_TIMEOUT_SECONDS", "300.0")),
         )
@@ -78,7 +83,8 @@ class AppConfig(LlmConfig):
             llm_health_check_url={self.llm_health_check_url},
             environment={self.environment},
             gliner_api_base_url={self.gliner_api_base_url},
-            glen_http_timeout_seconds={self.gliner_http_timeout_seconds},
+            gliner_task_timeout_seconds={self.gliner_task_timeout_seconds},
+            gliner_http_timeout_seconds={self.gliner_http_timeout_seconds},
             gliner_api_key={log_secret(self.gliner_api_key)},
             docling_url={self.docling_url},
             docling_api_key={log_secret(self.docling_api_key)},
