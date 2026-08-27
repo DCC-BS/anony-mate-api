@@ -17,7 +17,10 @@ class AppConfig(LlmConfig):
 
     gliner_api_base_url: str = Field(description="The Glen base API url")
     gliner_api_key: str = Field(description="The Gliner API key")
-    gliner_http_timeout_seconds: float = Field(description="The HTTP timeout for Gliner API calls", default=30.0)
+    gliner_http_timeout_seconds: float = Field(
+        description="The HTTP timeout for Gliner API calls; long documents take minutes to scan",
+        default=600.0,
+    )
 
     docling_url: str = Field(description="The URL for Docling service", default="http://localhost:5001/v1")
     docling_api_key: str = Field(
@@ -51,10 +54,14 @@ class AppConfig(LlmConfig):
             llm_health_check_url=get_env_or_throw("LLM_HEALTH_CHECK_URL"),
             environment=os.getenv("ENVIRONMENT", "production"),
             gliner_api_base_url=get_env_or_throw("GLINER_API_BASE_URL"),
-            gliner_http_timeout_seconds=float(os.getenv("GLINER_HTTP_TIMEOUT_SECONDS", 30.0)),
+            gliner_http_timeout_seconds=float(os.getenv("GLINER_HTTP_TIMEOUT_SECONDS", "600.0")),
             gliner_api_key=get_env_or_throw("GLINER_API_KEY"),
-            docling_url=get_env_or_throw("DOCLING_URL"),
-            docling_api_key=get_env_or_throw("DOCLING_API_KEY"),
+            # TEMPORARY: DOCLING_URL/DOCLING_API_KEY are not declared in
+            # .env.schema, so varlock never supplies them and get_env_or_throw
+            # aborts startup. Fall back to the field defaults until the schema
+            # declares them; then restore get_env_or_throw for both.
+            docling_url=os.getenv("DOCLING_URL", "http://localhost:5001/v1"),
+            docling_api_key=os.getenv("DOCLING_API_KEY", "none"),
             docling_poll_interval_seconds=float(os.getenv("DOCLING_POLL_INTERVAL_SECONDS", "1.0")),
             docling_conversion_timeout_seconds=float(os.getenv("DOCLING_CONVERSION_TIMEOUT_SECONDS", "300.0")),
             docling_http_timeout_seconds=float(os.getenv("DOCLING_HTTP_TIMEOUT_SECONDS", "30.0")),

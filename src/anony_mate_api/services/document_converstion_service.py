@@ -21,6 +21,34 @@ from anony_mate_api.utils import AppConfig
 
 logger = get_logger("document_conversion_service")
 
+# Marker docling inserts between pages; removed again once offsets are known.
+PAGE_BREAK_PLACEHOLDER = "<!-- docling-page -->"
+
+
+def split_pages(markdown: str) -> tuple[str, list[int]]:
+    """Split docling's page-break markers out of the markdown.
+
+    Args:
+        markdown: Markdown containing ``PAGE_BREAK_PLACEHOLDER`` between pages.
+
+    Returns:
+        The markdown without markers, and the character offset each page starts at.
+
+    >>> split_pages("a<!-- docling-page -->b")
+    ('ab', [0, 1])
+    >>> split_pages("only one page")
+    ('only one page', [0])
+    """
+    pages = markdown.split(PAGE_BREAK_PLACEHOLDER)
+
+    text = ""
+    offsets: list[int] = []
+    for page in pages:
+        offsets.append(len(text))
+        text += page
+
+    return text, offsets
+
 
 def get_mimetype(path_source: Path) -> str:
     """Get MIME type based on file extension."""
@@ -239,8 +267,9 @@ class DocumentConversionService:
         logger.debug("Fetching docling task result", task_id=task_id)
         response = await self._request("GET", f"/result/{task_id}")
         json_response = response.json()
-        html = (json_response.get("document") or {}).get("html_content", "")
-        return ConversionResult(html=html)
+        markdown = (json_response.get("document") or {}).get("md_content", "") or ""
+        text, page_offsets = split_pages(markdown)
+        return ConversionResult(text=text, page_offsets=page_offsets)
 
     async def convert(
         self,
@@ -260,13 +289,14 @@ class DocumentConversionService:
 
         files = {"files": (filename, content, content_type)}
         options: dict[str, Any] = {
-            "to_formats": ["html"],
+            "to_formats": ["md"],
             "image_export_mode": "placeholder",
             "do_ocr": True,
             "ocr_preset": "rapidocr",
             "ocr_lang": languages,
             "table_mode": "accurate",
             "pdf_backend": "docling_parse",
+            "md_page_break_placeholder": PAGE_BREAK_PLACEHOLDER,
         }
 
         task_id = await self.submit_async_task(files, options)

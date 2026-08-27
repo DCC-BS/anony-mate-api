@@ -1,4 +1,4 @@
-from anony_mate_api.models.gliner_models import GlinerEntity, GlinerResponse
+from anony_mate_api.models.gliner_models import GlinerEntity, GlinerProgress, GlinerResponse
 from anony_mate_api.services.redact_service import _create_entities_dict, _filter_blacklisted
 
 
@@ -10,7 +10,8 @@ def _gliner_response() -> GlinerResponse:
                 GlinerEntity(text="Acme Corp", confidence=1.0, start=11, end=20),
             ],
             "location": [GlinerEntity(text="Basel", confidence=1.0, start=24, end=29)],
-        }
+        },
+        progress=GlinerProgress(current=1, length=1, progress=1.0),
     )
 
 

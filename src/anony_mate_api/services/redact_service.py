@@ -8,7 +8,7 @@ from dcc_backend_common.logger import get_logger
 from fastapi import status
 from pydantic import ValidationError
 
-from anony_mate_api.models.error_codes import REDACT_ERROR
+from anony_mate_api.models.error_codes import REDACT_ERROR, REDACT_TIMEOUT
 from anony_mate_api.models.gliner_models import GlinerInput, GlinerResponse
 from anony_mate_api.models.redact_models import Entity, RedactBatchInput, RedactInput, RedactOutput
 from anony_mate_api.utils import AppConfig
@@ -89,8 +89,17 @@ class RedactService:
                 "status": status.HTTP_500_INTERNAL_SERVER_ERROR,
                 "debugMessage": f"Gliner request failed with status {e.response.status_code}",
             }) from e
-        except httpx.TimeoutException:
-            raise
+        except httpx.TimeoutException as e:
+            logger.exception(
+                "Gliner API timed out",
+                url=f"{self.client.base_url}{url}",
+                timeout=self.config.gliner_http_timeout_seconds,
+            )
+            raise ApiErrorException({
+                "errorId": REDACT_TIMEOUT,
+                "status": status.HTTP_504_GATEWAY_TIMEOUT,
+                "debugMessage": (f"Gliner request timed out after {self.config.gliner_http_timeout_seconds:.0f}s"),
+            }) from e
         except httpx.RequestError as e:
             logger.exception("Gliner api connection error", url=f"{self.client.base_url}{url}", error=str(e))
             raise ApiErrorException({
@@ -110,8 +119,6 @@ class RedactService:
 
     async def _extract_entities(self, payload: GlinerInput) -> GlinerResponse:
         response = await self._request("/extract_entities", payload.model_dump())
-
-        print(response.json())
         return GlinerResponse.model_validate(response.json())
 
     async def _extract_entities_batch(
