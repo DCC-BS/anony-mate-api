@@ -1,6 +1,6 @@
 import asyncio
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from io import BytesIO
 from pathlib import Path
 from typing import Any, final
@@ -125,9 +125,17 @@ class DocumentConversionService:
     async def close(self) -> None:
         await self.client.aclose()
 
+    async def prepare_upload(self, file: UploadFile) -> tuple[bytes, str, str]:
+        """Read and validate an upload while the request is still open.
+
+        The body is gone once the handler returns, so a backgrounded conversion
+        has to be handed the bytes rather than the ``UploadFile``.
+        """
+        return await self._prepare_file_data(file)
+
     async def _prepare_file_data(
         self,
-        file: UploadFile | BytesIO,
+        file: UploadFile | BytesIO | bytes,
         filename: str | None = None,
         content_type: str | None = None,
     ) -> tuple[bytes, str, str]:
@@ -141,7 +149,12 @@ class DocumentConversionService:
         Returns:
             Tuple of (content_bytes, filename, content_type).
         """
-        if isinstance(file, UploadFile):
+        if isinstance(file, bytes):
+            # Already read by the caller, so a backgrounded conversion can run
+            # after the request that carried the upload has ended.
+            content = file
+            resolved_filename = filename or "uploaded_document"
+        elif isinstance(file, UploadFile):
             await file.seek(0)
             content = await file.read()
             resolved_filename = filename or file.filename or "uploaded_document"
@@ -202,7 +215,11 @@ class DocumentConversionService:
             })
         return str(task_id)
 
-    async def poll_task_status(self, task_id: str) -> None:
+    async def poll_task_status(
+        self,
+        task_id: str,
+        on_status: Callable[[str], None] | None = None,
+    ) -> None:
         logger.debug("Starting docling task polling", task_id=task_id)
         start_time = time.monotonic()
         retry_backoff = self.config.docling_poll_interval_seconds
@@ -250,6 +267,9 @@ class DocumentConversionService:
             task_status = poll_data.get("task_status")
             logger.debug("Polled docling task status", task_id=task_id, task_status=task_status)
 
+            if on_status and task_status:
+                on_status(task_status)
+
             if task_status in ("success", "partial_success"):
                 return
             if task_status in ("failure", "skipped"):
@@ -273,9 +293,10 @@ class DocumentConversionService:
 
     async def convert(
         self,
-        file: UploadFile | BytesIO,
+        file: UploadFile | BytesIO | bytes,
         filename: str | None = None,
         content_type: str | None = None,
+        on_status: Callable[[str], None] | None = None,
     ) -> ConversionResult:
         languages = ["de", "en", "fr", "it"]
         logger.debug("Received file for conversion", file_type=type(file).__name__)
@@ -300,5 +321,5 @@ class DocumentConversionService:
         }
 
         task_id = await self.submit_async_task(files, options)
-        await self.poll_task_status(task_id)
+        await self.poll_task_status(task_id, on_status)
         return await self.fetch_task_result(task_id)

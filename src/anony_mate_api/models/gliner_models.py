@@ -26,4 +26,6 @@ class GlinerProgress(BaseModel):
 
 class GlinerResponse(BaseModel):
     entities: dict[str, list[GlinerEntity]] = Field(description="The extracted entities grouped by entity type.")
-    progress: GlinerProgress
+    # Only the streaming batch endpoint reports this; a task's progress is read
+    # from the task itself while it runs.
+    progress: GlinerProgress | None = None

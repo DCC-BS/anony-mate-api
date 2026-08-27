@@ -31,12 +31,12 @@ class AppConfig(LlmConfig):
         default=1.0,
     )
     docling_conversion_timeout_seconds: float = Field(
-        description="Maximum seconds to wait for Docling conversion task to complete",
-        default=300.0,
+        description="Maximum seconds to wait for Docling conversion task to complete; large scanned PDFs take minutes",
+        default=1800.0,
     )
     docling_http_timeout_seconds: float = Field(
-        description="Per-request HTTP timeout in seconds for Docling API calls",
-        default=30.0,
+        description="Per-request HTTP timeout in seconds for Docling API calls; the upload itself can be slow",
+        default=300.0,
     )
 
     @classmethod
@@ -63,8 +63,8 @@ class AppConfig(LlmConfig):
             docling_url=os.getenv("DOCLING_URL", "http://localhost:5001/v1"),
             docling_api_key=os.getenv("DOCLING_API_KEY", "none"),
             docling_poll_interval_seconds=float(os.getenv("DOCLING_POLL_INTERVAL_SECONDS", "1.0")),
-            docling_conversion_timeout_seconds=float(os.getenv("DOCLING_CONVERSION_TIMEOUT_SECONDS", "300.0")),
-            docling_http_timeout_seconds=float(os.getenv("DOCLING_HTTP_TIMEOUT_SECONDS", "30.0")),
+            docling_conversion_timeout_seconds=float(os.getenv("DOCLING_CONVERSION_TIMEOUT_SECONDS", "1800.0")),
+            docling_http_timeout_seconds=float(os.getenv("DOCLING_HTTP_TIMEOUT_SECONDS", "300.0")),
         )
 
     @override

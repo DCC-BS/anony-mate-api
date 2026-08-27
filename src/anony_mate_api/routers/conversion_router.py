@@ -12,7 +12,9 @@ from fastapi import APIRouter, Request, UploadFile
 
 from anony_mate_api.container import Container
 from anony_mate_api.models.conversion import ConversionResult
+from anony_mate_api.models.tasks import TaskAccepted
 from anony_mate_api.services.document_converstion_service import DocumentConversionService
+from anony_mate_api.services.task_store import Task, TaskStore
 
 logger = get_logger("conversion_router")
 
@@ -20,6 +22,7 @@ logger = get_logger("conversion_router")
 @inject
 def create_router(
     document_conversion_service: DocumentConversionService = Provide[Container.document_conversion_service],
+    task_store: TaskStore = Provide[Container.task_store],
 ) -> APIRouter:
     logger.info("Creating conversion router")
     router: APIRouter = APIRouter(prefix="/convert", tags=["convert"])
@@ -38,6 +41,35 @@ def create_router(
                 return ConversionResult(text="")
 
         return task.result()
+
+    @router.post(
+        "/doc/async",
+        summary="Submit a document conversion and poll for it",
+        status_code=202,
+    )
+    async def convert_async(file: UploadFile) -> TaskAccepted:
+        """Accept the upload and return at once, so a slow OCR cannot time out."""
+        logger.info("Queueing document conversion", filename=file.filename, size=file.size)
+
+        # The upload is consumed here: the request body is gone by the time the
+        # background task runs.
+        content, filename, content_type = await document_conversion_service.prepare_upload(file)
+
+        async def run(task: Task) -> ConversionResult:
+            def report(docling_status: str) -> None:
+                # One task is one document, so there is no fraction to report;
+                # what a caller can use is whether docling has started on it.
+                task.status = "running" if docling_status == "started" else "pending"
+                task.touch()
+
+            return await document_conversion_service.convert(
+                content,
+                filename=filename,
+                content_type=content_type,
+                on_status=report,
+            )
+
+        return TaskAccepted(task_id=task_store.submit(run).id)
 
     logger.info("Conversion router configured")
     return router

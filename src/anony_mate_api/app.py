@@ -11,7 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from structlog.stdlib import BoundLogger
 
 from anony_mate_api.container import Container
-from anony_mate_api.routers import blacklist_router, conversion_router, entity_types_router, redact_router
+from anony_mate_api.routers import (
+    blacklist_router,
+    conversion_router,
+    entity_types_router,
+    redact_router,
+    task_router,
+)
 from anony_mate_api.utils.app_config import AppConfig
 
 config = {}  # TODO load your config here
@@ -71,7 +77,7 @@ def _configure_container(app: FastAPI, logger: BoundLogger) -> Container:
     """
     logger.debug("Configuring dependency injection container")
     container = Container()
-    container.wire(modules=[redact_router, entity_types_router, conversion_router])
+    container.wire(modules=[redact_router, entity_types_router, conversion_router, task_router])
     container.check_dependencies()
     logger.debug("Dependency injection configured")
     app.state.container = container
@@ -87,6 +93,7 @@ def _register_routes(app: FastAPI, logger: BoundLogger) -> None:
     app.include_router(entity_types_router.create_router())
     app.include_router(blacklist_router.create_router())
     app.include_router(conversion_router.create_router())
+    app.include_router(task_router.create_router())
     logger.debug("All routers registered")
 
 
