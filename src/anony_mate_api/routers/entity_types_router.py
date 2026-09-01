@@ -1,11 +1,8 @@
 from enum import Enum
 
 from dcc_backend_common.logger import get_logger
-from dependency_injector.wiring import Provide, inject
+from dependency_injector.wiring import inject
 from fastapi import APIRouter
-
-from anony_mate_api.container import Container
-from anony_mate_api.services.redact_service import RedactService
 
 logger = get_logger("entity_types_router")
 
@@ -31,7 +28,7 @@ ENTITY_TYPES: dict[EntityType, dict[str, str]] = {
 
 
 @inject
-def create_router(redact_service: RedactService = Provide[Container.redact_service]) -> APIRouter:
+def create_router() -> APIRouter:
     logger.info("Creating redact router")
     router: APIRouter = APIRouter(prefix="/entity_types")
 

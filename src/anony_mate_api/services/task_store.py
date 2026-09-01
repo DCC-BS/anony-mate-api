@@ -28,7 +28,7 @@ DEFAULT_TTL_SECONDS = 3600.0
 
 
 @dataclass
-class Task:
+class TaskData:
     """One submitted job and, once it finishes, where its result waits."""
 
     id: str
@@ -48,11 +48,11 @@ class TaskStore:
 
     def __init__(self, ttl_seconds: float = DEFAULT_TTL_SECONDS) -> None:
         self._ttl_seconds = ttl_seconds
-        self._tasks: dict[str, Task] = {}
+        self._tasks: dict[str, TaskData] = {}
         self._resources: dict[str, Any] = {}
         self._running: dict[str, asyncio.Task[None]] = {}
 
-    def submit(self, work: Callable[[Task], Awaitable[Any]]) -> Task:
+    def submit(self, work: Callable[[TaskData], Awaitable[Any]]) -> TaskData:
         """Start ``work`` in the background and return its pending task.
 
         Args:
@@ -64,12 +64,12 @@ class TaskStore:
         """
         self._expire()
 
-        task = Task(id=uuid.uuid4().hex)
+        task = TaskData(id=uuid.uuid4().hex)
         self._tasks[task.id] = task
         self._running[task.id] = asyncio.create_task(self._run(task, work))
         return task
 
-    async def _run(self, task: Task, work: Callable[[Task], Awaitable[Any]]) -> None:
+    async def _run(self, task: TaskData, work: Callable[[TaskData], Awaitable[Any]]) -> None:
         task.status = "running"
         task.touch()
         try:
@@ -88,7 +88,7 @@ class TaskStore:
             task.touch()
             _ = self._running.pop(task.id, None)
 
-    def get(self, task_id: str) -> Task | None:
+    def get(self, task_id: str) -> TaskData | None:
         self._expire()
         return self._tasks.get(task_id)
 

@@ -13,8 +13,8 @@ from fastapi import APIRouter, Request, UploadFile
 from anony_mate_api.container import Container
 from anony_mate_api.models.conversion import ConversionResult
 from anony_mate_api.models.tasks import TaskAccepted
-from anony_mate_api.services.document_converstion_service import DocumentConversionService
-from anony_mate_api.services.task_store import Task, TaskStore
+from anony_mate_api.services.document_conversion_service import DocumentConversionService
+from anony_mate_api.services.task_store import TaskData, TaskStore
 
 logger = get_logger("conversion_router")
 
@@ -55,7 +55,7 @@ def create_router(
         # background task runs.
         content, filename, content_type = await document_conversion_service.prepare_upload(file)
 
-        async def run(task: Task) -> ConversionResult:
+        async def run(task: TaskData) -> ConversionResult:
             def report(docling_status: str) -> None:
                 # One task is one document, so there is no fraction to report;
                 # what a caller can use is whether docling has started on it.
