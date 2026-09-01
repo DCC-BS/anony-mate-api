@@ -25,7 +25,7 @@ def create_router(task_store: TaskStore = Provide[Container.task_store]) -> APIR
 
     @router.get("/task/{task_id}", summary="Status of a submitted task")
     async def task_state(task_id: str) -> TaskState:
-        task = task_store.get(task_id)
+        task = task_store.poll(task_id)
         if task is None:
             raise ApiErrorException({
                 "errorId": TASK_NOT_FOUND,
@@ -37,6 +37,7 @@ def create_router(task_store: TaskStore = Provide[Container.task_store]) -> APIR
             task_id=task.id,
             status=task.status,
             progress=task.progress,
+            queue_position=task.queue_position,
             resource_id=task.resource_id,
             error=task.error,
         )

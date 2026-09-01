@@ -13,8 +13,9 @@ from fastapi import APIRouter, Request, UploadFile
 from anony_mate_api.container import Container
 from anony_mate_api.models.conversion import ConversionResult
 from anony_mate_api.models.tasks import TaskAccepted
+from anony_mate_api.routers._submission import client_key, queue_full_error
 from anony_mate_api.services.document_converstion_service import DocumentConversionService
-from anony_mate_api.services.task_store import Task, TaskStore
+from anony_mate_api.services.task_store import QueueFullError, Task, TaskStore
 
 logger = get_logger("conversion_router")
 
@@ -47,7 +48,7 @@ def create_router(
         summary="Submit a document conversion and poll for it",
         status_code=202,
     )
-    async def convert_async(file: UploadFile) -> TaskAccepted:
+    async def convert_async(file: UploadFile, request: Request) -> TaskAccepted:
         """Accept the upload and return at once, so a slow OCR cannot time out."""
         logger.info("Queueing document conversion", filename=file.filename, size=file.size)
 
@@ -56,10 +57,12 @@ def create_router(
         content, filename, content_type = await document_conversion_service.prepare_upload(file)
 
         async def run(task: Task) -> ConversionResult:
-            def report(docling_status: str) -> None:
+            def report(docling_status: str, queue_position: int | None) -> None:
                 # One task is one document, so there is no fraction to report;
-                # what a caller can use is whether docling has started on it.
+                # what a caller can use is whether docling has started on it,
+                # and how many documents are still ahead of it if it has not.
                 task.status = "running" if docling_status == "started" else "pending"
+                task.queue_position = queue_position
                 task.touch()
 
             return await document_conversion_service.convert(
@@ -69,7 +72,12 @@ def create_router(
                 on_status=report,
             )
 
-        return TaskAccepted(task_id=task_store.submit(run).id)
+        try:
+            task = task_store.submit(run, lane="convert", client=client_key(request))
+        except QueueFullError as error:
+            raise queue_full_error(error) from error
+
+        return TaskAccepted(task_id=task.id)
 
     logger.info("Conversion router configured")
     return router

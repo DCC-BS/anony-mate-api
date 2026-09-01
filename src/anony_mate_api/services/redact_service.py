@@ -19,9 +19,6 @@ from anony_mate_api.utils import AppConfig
 
 logger = get_logger("redact_service")
 
-#: A scan runs for minutes, so polling every second only adds request noise.
-GLINER_POLL_INTERVAL_SECONDS = 10.0
-
 #: Echoed in Gliner's log, so one call can be traced across both services.
 CORRELATION_HEADER = "X-Correlation-Id"
 
@@ -206,7 +203,7 @@ class RedactService:
                     ),
                 })
 
-            await asyncio.sleep(GLINER_POLL_INTERVAL_SECONDS)
+            await asyncio.sleep(self.config.gliner_poll_interval_seconds)
 
         result = await self._get(f"/resource/{state['resource_id']}")
         return GlinerResponse.model_validate(result.json())

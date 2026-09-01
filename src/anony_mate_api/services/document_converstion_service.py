@@ -15,6 +15,7 @@ from anony_mate_api.models.conversion import ConversionResult
 from anony_mate_api.models.error_codes import (
     DOCUMENT_CONVERSION_ERROR,
     DOCUMENT_CONVERSION_TIMEOUT,
+    FILE_TOO_LARGE,
     INVALID_MIME_TYPE,
 )
 from anony_mate_api.utils import AppConfig
@@ -130,8 +131,30 @@ class DocumentConversionService:
 
         The body is gone once the handler returns, so a backgrounded conversion
         has to be handed the bytes rather than the ``UploadFile``.
+
+        Raises:
+            ApiErrorException: If the upload is larger than the configured
+                limit. A queued document is held in memory until a worker
+                converts it, so an unbounded upload is an unbounded queue.
         """
-        return await self._prepare_file_data(file)
+        self._reject_oversized(file.size, file.filename)
+        content, filename, content_type = await self._prepare_file_data(file)
+        # Starlette only knows the size when the client sent Content-Length,
+        # so the real length is checked again once the body is in hand.
+        self._reject_oversized(len(content), filename)
+        return content, filename, content_type
+
+    def _reject_oversized(self, size: int | None, filename: str | None) -> None:
+        limit = self.config.max_upload_bytes
+        if size is None or size <= limit:
+            return
+
+        logger.warning("Rejecting oversized upload", filename=filename, size=size, limit=limit)
+        raise ApiErrorException({
+            "errorId": FILE_TOO_LARGE,
+            "status": status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            "debugMessage": f"Upload is {size} bytes, limit is {limit}",
+        })
 
     async def _prepare_file_data(
         self,
@@ -218,7 +241,7 @@ class DocumentConversionService:
     async def poll_task_status(
         self,
         task_id: str,
-        on_status: Callable[[str], None] | None = None,
+        on_status: Callable[[str, int | None], None] | None = None,
     ) -> None:
         logger.debug("Starting docling task polling", task_id=task_id)
         start_time = time.monotonic()
@@ -268,7 +291,10 @@ class DocumentConversionService:
             logger.debug("Polled docling task status", task_id=task_id, task_status=task_status)
 
             if on_status and task_status:
-                on_status(task_status)
+                # Docling reports the place in its queue while a task is still
+                # pending, and nothing once a worker picks it up. Passing it on
+                # is what lets a caller say "3rd in line" instead of spinning.
+                on_status(task_status, poll_data.get("task_position"))
 
             if task_status in ("success", "partial_success"):
                 return
@@ -296,7 +322,7 @@ class DocumentConversionService:
         file: UploadFile | BytesIO | bytes,
         filename: str | None = None,
         content_type: str | None = None,
-        on_status: Callable[[str], None] | None = None,
+        on_status: Callable[[str, int | None], None] | None = None,
     ) -> ConversionResult:
         languages = ["de", "en", "fr", "it"]
         logger.debug("Received file for conversion", file_type=type(file).__name__)
@@ -315,8 +341,8 @@ class DocumentConversionService:
             "do_ocr": True,
             "ocr_preset": "rapidocr",
             "ocr_lang": languages,
-            "table_mode": "accurate",
-            "pdf_backend": "docling_parse",
+            "table_mode": self.config.docling_table_mode,
+            "pdf_backend": self.config.docling_pdf_backend,
             "md_page_break_placeholder": PAGE_BREAK_PLACEHOLDER,
         }
 

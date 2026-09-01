@@ -28,12 +28,15 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """
     Lifespan context manager for startup and shutdown events.
     """
-    # Startup: nothing to do here, container is configured synchronously
+    # The queue workers need a running loop, so they start here rather than
+    # when the container builds the store.
+    container: Container = app.state.container
+    container.task_store().start()
     yield
     # Shutdown: close resources
     logger = get_logger("app")
     logger.info("Shutting down application, closing resources...")
-    container: Container = app.state.container
+    await container.task_store().stop()
     redact_service = container.redact_service()
     document_conversion_service = container.document_conversion_service()
     await redact_service.close()

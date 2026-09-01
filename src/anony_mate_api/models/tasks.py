@@ -20,6 +20,10 @@ class TaskState(BaseModel):
         default=None,
         description="Fraction of the work done, in [0, 1]; null while unknown",
     )
+    queue_position: int | None = Field(
+        default=None,
+        description="Place in the queue while the work is still waiting; null once it runs",
+    )
     resource_id: str | None = Field(
         default=None,
         description="Set once finished: fetch `GET /resource/{resource_id}` exactly once",
