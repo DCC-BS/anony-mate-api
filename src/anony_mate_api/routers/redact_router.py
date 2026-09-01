@@ -7,7 +7,7 @@ from anony_mate_api.models.redact_models import RedactBatchInput, RedactInput, R
 from anony_mate_api.models.tasks import TaskAccepted
 from anony_mate_api.routers._submission import client_key, queue_full_error
 from anony_mate_api.services.redact_service import RedactService
-from anony_mate_api.services.task_store import QueueFullError, Task, TaskStore
+from anony_mate_api.services.task_store import QueueFullError, TaskData, TaskStore
 
 logger = get_logger("redact_router")
 
@@ -32,7 +32,7 @@ def create_router(
     async def redact_async(payload: RedactInput, request: Request) -> TaskAccepted:
         """Accept the text and return at once, so a long scan cannot time out."""
 
-        async def run(task: Task) -> RedactOutput:
+        async def run(task: TaskData) -> RedactOutput:
             def report(progress: float | None) -> None:
                 task.progress = progress
                 task.touch()

@@ -65,7 +65,7 @@ class LaneConfig:
 
 
 @dataclass
-class Task:
+class TaskData:
     """One submitted job and, once it finishes, where its result waits."""
 
     id: str
@@ -93,8 +93,8 @@ class Task:
 class _Waiting:
     """A job that has been accepted but has not been given a worker yet."""
 
-    task: Task
-    work: Callable[[Task], Awaitable[Any]]
+    task: TaskData
+    work: Callable[[TaskData], Awaitable[Any]]
 
 
 class _Lane:
@@ -173,7 +173,7 @@ class TaskStore:
         self._lane_configs = dict(lanes or {})
         self._lane_configs.setdefault(DEFAULT_LANE, LaneConfig(workers=8, max_queued=256))
         self._lanes: dict[str, _Lane] = {name: _Lane(name, config) for name, config in self._lane_configs.items()}
-        self._tasks: dict[str, Task] = {}
+        self._tasks: dict[str, TaskData] = {}
         self._resources: dict[str, Any] = {}
         self._running: set[str] = set()
         self._workers: list[asyncio.Task[None]] = []
@@ -202,10 +202,10 @@ class TaskStore:
 
     def submit(
         self,
-        work: Callable[[Task], Awaitable[Any]],
+        work: Callable[[TaskData], Awaitable[Any]],
         lane: str = DEFAULT_LANE,
         client: str = "anonymous",
-    ) -> Task:
+    ) -> TaskData:
         """Queue ``work`` and return its task, already pollable.
 
         Args:
@@ -227,7 +227,7 @@ class TaskStore:
             logger.warning("Refusing submission, lane full", lane=target.name, waiting=target.size)
             raise QueueFullError(target.name, target.config.max_queued)
 
-        task = Task(id=uuid.uuid4().hex, lane=target.name)
+        task = TaskData(id=uuid.uuid4().hex, lane=target.name)
         self._tasks[task.id] = task
         target.append(client, _Waiting(task=task, work=work))
         self._refresh_positions(target)
@@ -255,7 +255,7 @@ class TaskStore:
             except Exception:
                 logger.exception("Queue worker recovered from an unexpected error", lane=lane.name)
 
-    def _is_abandoned(self, task: Task) -> bool:
+    def _is_abandoned(self, task: TaskData) -> bool:
         """Whether nobody has asked about this task for long enough to drop it.
 
         Work is dispatched to services that cannot be recalled once started, so
@@ -264,7 +264,7 @@ class TaskStore:
         """
         return time.monotonic() - task.polled_at > self._abandoned_after_seconds
 
-    def _discard(self, task: Task) -> None:
+    def _discard(self, task: TaskData) -> None:
         """Drop a queued job whose caller stopped listening."""
         logger.info(
             "Dropping abandoned task before it reached a worker",
@@ -277,7 +277,7 @@ class TaskStore:
         task.queue_position = None
         task.touch()
 
-    async def _run(self, task: Task, work: Callable[[Task], Awaitable[Any]]) -> None:
+    async def _run(self, task: TaskData, work: Callable[[TaskData], Awaitable[Any]]) -> None:
         task.status = "running"
         task.queue_position = None
         task.touch()
@@ -315,11 +315,11 @@ class TaskStore:
         target = self._lanes.get(lane)
         return target.size if target else 0
 
-    def get(self, task_id: str) -> Task | None:
+    def get(self, task_id: str) -> TaskData | None:
         self._expire()
         return self._tasks.get(task_id)
 
-    def poll(self, task_id: str) -> Task | None:
+    def poll(self, task_id: str) -> TaskData | None:
         """Read a task on a caller's behalf, recording that they are still there.
 
         Queued work is dropped when nobody asks about it, so the poll endpoint

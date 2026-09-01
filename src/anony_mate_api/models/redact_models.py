@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from anony_mate_api.models.gliner_models import GlinerEntity
+
 
 class RedactInput(BaseModel):
     text: str = Field(description="Text to redact")
@@ -21,13 +23,10 @@ class RedactBatchInput(BaseModel):
     blacklist: list[str] = Field(description="Blacklist of words to avoid redaction", default=[])
 
 
-class Entity(BaseModel):
+class Entity(GlinerEntity):
     id: str = Field(description="ID of the entity")
     text: str = Field(description="Text of the entity")
     label: str = Field(description="Label of the entity")
-    start: int = Field(description="Start char index of the entity")
-    end: int = Field(description="End char index of the entity")
-    confidence: float = Field(description="Confidence of the entity betweeen 0 and 1")
 
 
 class RedactOutput(BaseModel):
