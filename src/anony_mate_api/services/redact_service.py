@@ -302,6 +302,14 @@ class RedactService:
         """
         logger.info("Submitting extraction to Gliner", text_chars=len(payload.text))
 
+        if not self.config.gliner_use_async_tasks:
+            # One request, held open for the whole scan. A proxy that does not
+            # route Gliner's task endpoints leaves this as the only way in; a
+            # long document can outlive the connection, which is what the task
+            # API exists to avoid.
+            response = await self._request("/extract_entities", payload.model_dump())
+            return GlinerResponse.model_validate(response.json())
+
         task_id = await self._submit_extraction(payload)
         logger.debug("Gliner accepted extraction", gliner_task_id=task_id)
 
