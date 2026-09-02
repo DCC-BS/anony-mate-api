@@ -270,23 +270,25 @@ class RedactService:
         return await self._request(url, body=None, method="GET")
 
     async def _submit_extraction(self, payload: GlinerInput) -> str:
-        """Hand the text to Gliner and return the task id it answers with.
+        """Hand the request to Gliner and return the task id it answers with.
 
-        As a file part the document is an ordinary upload rather than one very
-        large JSON string, which is what a firewall between the two services
-        objects to; gzip keeps it small on top of that. The JSON endpoint is
-        still there, and the flag switches back to it.
+        The whole request travels as one gzipped file part. The firewall
+        between the two services reads JSON bodies and form fields and refuses
+        them once they grow: a schema of two dozen labels, each with a
+        paragraph describing it, is already too much, whether it rides in the
+        body or beside the upload. A file part is not read that way. The JSON
+        endpoint is still there, and the flag switches back to it.
         """
         if not self.config.gliner_use_binary_upload:
             accepted = await self._request("/extract_entities/async", payload.model_dump())
             return accepted.json()["task_id"]
 
-        options = payload.model_dump(exclude={"text"})
-        files = {"file": ("document.txt.gz", gzip.compress(payload.text.encode()), "application/gzip")}
+        body = payload.model_dump_json().encode()
+        files = {"file": ("request.json.gz", gzip.compress(body), "application/gzip")}
         accepted = await self._request(
             "/extract_entities/async/upload",
             files=files,
-            data={"options": json.dumps(options), "charset": "utf-8"},
+            data={"charset": "utf-8"},
         )
         return accepted.json()["task_id"]
 
