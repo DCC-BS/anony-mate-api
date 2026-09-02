@@ -190,14 +190,15 @@ class RedactService:
             "Authorization": f"Bearer {self.config.gliner_api_key}",
             CORRELATION_HEADER: correlation_id,
         }
-        if files is not None:
-            # A multipart upload carries the document as file bytes; only its
-            # size is worth logging, the parts themselves are not JSON.
-            payload = b"".join(content for _, content, _ in files.values())
-            send_kwargs: dict[str, Any] = {"files": files, "data": data or {}}
-        else:
-            payload = json.dumps(body).encode() if body is not None else b""
-            send_kwargs = {"json": body}
+        # A multipart upload carries the document as file bytes; only its size
+        # is worth logging, the parts themselves are not JSON.
+        payload = (
+            b"".join(content for _, content, _ in files.values())
+            if files is not None
+            else json.dumps(body).encode()
+            if body is not None
+            else b""
+        )
         logger.debug(
             "Calling Gliner",
             base_url=str(self.client.base_url),
@@ -207,7 +208,10 @@ class RedactService:
             correlation_id=correlation_id,
         )
         try:
-            response = await self.client.request(method, url, headers=headers, **send_kwargs)
+            if files is not None:
+                response = await self.client.request(method, url, headers=headers, files=files, data=data or {})
+            else:
+                response = await self.client.request(method, url, headers=headers, json=body)
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             content_type = e.response.headers.get("content-type", "")
