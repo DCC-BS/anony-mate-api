@@ -32,3 +32,26 @@ class Entity(GlinerEntity):
 class RedactOutput(BaseModel):
     text: str = Field(description="Redacted text redacted word are written as [label:id] for example [person:1]")
     entities: dict[str, list[Entity]]
+
+
+class RedactFileOptions(BaseModel):
+    """Everything a document needs redacted besides the file itself."""
+
+    entity_types: list[str] | dict[str, str] = Field(
+        description="Entity types to redact, either a list of labels or a dict of label to description",
+        default=[],
+    )
+    threshold: float = Field(description="Confidence threshold for redaction", default=0.8)
+    blacklist: list[str] = Field(description="Blacklist of words to avoid redaction", default=[])
+
+
+class DocumentRedactOutput(BaseModel):
+    """A document converted and redacted in one submission."""
+
+    text: str = Field(description="The converted document as markdown text, before redaction")
+    page_offsets: list[int] = Field(
+        description="Character offset where each page starts in `text`; empty for formats without pages",
+        default_factory=list,
+    )
+    redacted_text: str = Field(description="`text` with every detection written as [label:id]")
+    entities: dict[str, list[Entity]]

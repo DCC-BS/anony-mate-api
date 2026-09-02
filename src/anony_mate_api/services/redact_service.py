@@ -1,5 +1,7 @@
 import asyncio
+import gzip
 import json
+import re
 import time
 from collections import defaultdict
 from collections.abc import Callable
@@ -38,6 +40,100 @@ def _create_entities_dict(gliner_response: GlinerResponse) -> dict[str, list[Ent
                 )
             )
     return entity_dict
+
+
+#: Labels whose shape is fixed by law or convention, and the shape they take.
+#:
+#: The model reads meaning, not format, so it will offer a lone digit as a
+#: postal code where the surrounding words fit. Where a label has one true
+#: form, checking it is cheaper and surer than describing it away.
+LABEL_PATTERNS: dict[str, re.Pattern[str]] = {
+    # A Swiss postal code is always four digits, 1000 to 9999.
+    "plz": re.compile(r"^[1-9]\d{3}$"),
+}
+
+
+def _filter_malformed(entities: dict[str, list[Entity]]) -> dict[str, list[Entity]]:
+    """Drop detections that cannot be what their label says they are."""
+    filtered: dict[str, list[Entity]] = {}
+
+    for label, entity_list in entities.items():
+        pattern = LABEL_PATTERNS.get(label)
+        if pattern is None:
+            filtered[label] = entity_list
+            continue
+
+        kept = [entity for entity in entity_list if pattern.fullmatch(entity.text.strip())]
+        dropped = len(entity_list) - len(kept)
+        if dropped:
+            logger.debug("Dropped malformed detections", label=label, dropped=dropped)
+        filtered[label] = kept
+
+    return filtered
+
+
+#: Labels whose mentions repeat verbatim through a document.
+#:
+#: The model reads each mention on its own evidence, so a name it names once
+#: it may pass over the next time — a bare surname after "Herr" reads like an
+#: ordinary word where the full name did not. What it recognised anywhere it
+#: has recognised everywhere.
+REPEATING_LABELS = frozenset({"person", "organisation", "adresse", "ort", "e-mail-adresse", "telefonnummer"})
+
+#: A surname worth carrying to its other mentions: letters, at least three of
+#: them, hyphens and apostrophes allowed inside.
+_SURNAME = re.compile(r"^[^\W\d_][\w'\-]{2,}$")
+
+
+def _propagate_repeats(text: str, entities: dict[str, list[Entity]]) -> dict[str, list[Entity]]:
+    """Give every repeat of a detected mention the label it was given once.
+
+    Both the whole mention and, for a person, its last name: "Andreas Mueller"
+    detected once makes every later "Mueller" a person too. Positions already
+    covered by a detection are left alone, whatever their label, so this only
+    ever adds to what the model found.
+    """
+    taken = [(entity.start, entity.end) for entity_list in entities.values() for entity in entity_list]
+    grown = {label: list(entity_list) for label, entity_list in entities.items()}
+
+    for label in REPEATING_LABELS & entities.keys():
+        found = entities[label]
+        confidence = min((entity.confidence for entity in found), default=1.0)
+
+        for needle in _repeatable_mentions(label, found):
+            # Not \b: a hyphen is a word boundary to it, so "Basel" would be
+            # taken out of "Basel-Stadt". A repeat only counts where the
+            # mention stands on its own.
+            for match in re.finditer(rf"(?<![\w'\-]){re.escape(needle)}(?![\w'\-])", text):
+                if any(match.start() < end and start < match.end() for start, end in taken):
+                    continue
+
+                taken.append((match.start(), match.end()))
+                grown[label].append(
+                    Entity(
+                        label=label,
+                        id=str(len(grown[label]) + 1),
+                        text=match.group(),
+                        start=match.start(),
+                        end=match.end(),
+                        confidence=confidence,
+                    )
+                )
+
+    return grown
+
+
+def _repeatable_mentions(label: str, entities: list[Entity]) -> set[str]:
+    """The strings a label's detections make worth searching for again."""
+    mentions = {entity.text.strip() for entity in entities if len(entity.text.strip()) > 2}
+
+    if label == "person":
+        for entity in entities:
+            surname = entity.text.strip().split()[-1:]
+            if surname and _SURNAME.fullmatch(surname[0]):
+                mentions.add(surname[0])
+
+    return mentions
 
 
 def _filter_blacklisted(entities: dict[str, list[Entity]], blacklist: list[str]) -> dict[str, list[Entity]]:
@@ -84,6 +180,8 @@ class RedactService:
         url: str,
         body: dict[str, Any] | None = None,
         method: str = "POST",
+        files: dict[str, tuple[str, bytes, str]] | None = None,
+        data: dict[str, str] | None = None,
     ) -> httpx.Response:
         # Sent along so the same call can be found in Gliner's log. If it never
         # appears there, something between the two rejected the request.
@@ -92,7 +190,14 @@ class RedactService:
             "Authorization": f"Bearer {self.config.gliner_api_key}",
             CORRELATION_HEADER: correlation_id,
         }
-        payload = json.dumps(body).encode() if body is not None else b""
+        if files is not None:
+            # A multipart upload carries the document as file bytes; only its
+            # size is worth logging, the parts themselves are not JSON.
+            payload = b"".join(content for _, content, _ in files.values())
+            send_kwargs: dict[str, Any] = {"files": files, "data": data or {}}
+        else:
+            payload = json.dumps(body).encode() if body is not None else b""
+            send_kwargs = {"json": body}
         logger.debug(
             "Calling Gliner",
             base_url=str(self.client.base_url),
@@ -102,7 +207,7 @@ class RedactService:
             correlation_id=correlation_id,
         )
         try:
-            response = await self.client.request(method, url, headers=headers, json=body)
+            response = await self.client.request(method, url, headers=headers, **send_kwargs)
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             content_type = e.response.headers.get("content-type", "")
@@ -160,6 +265,27 @@ class RedactService:
     async def _get(self, url: str) -> httpx.Response:
         return await self._request(url, body=None, method="GET")
 
+    async def _submit_extraction(self, payload: GlinerInput) -> str:
+        """Hand the text to Gliner and return the task id it answers with.
+
+        As a file part the document is an ordinary upload rather than one very
+        large JSON string, which is what a firewall between the two services
+        objects to; gzip keeps it small on top of that. The JSON endpoint is
+        still there, and the flag switches back to it.
+        """
+        if not self.config.gliner_use_binary_upload:
+            accepted = await self._request("/extract_entities/async", payload.model_dump())
+            return accepted.json()["task_id"]
+
+        options = payload.model_dump(exclude={"text"})
+        files = {"file": ("document.txt.gz", gzip.compress(payload.text.encode()), "application/gzip")}
+        accepted = await self._request(
+            "/extract_entities/async/upload",
+            files=files,
+            data={"options": json.dumps(options), "charset": "utf-8"},
+        )
+        return accepted.json()["task_id"]
+
     async def _extract_entities(
         self,
         payload: GlinerInput,
@@ -172,8 +298,7 @@ class RedactService:
         """
         logger.info("Submitting extraction to Gliner", text_chars=len(payload.text))
 
-        accepted = await self._request("/extract_entities/async", payload.model_dump())
-        task_id = accepted.json()["task_id"]
+        task_id = await self._submit_extraction(payload)
         logger.debug("Gliner accepted extraction", gliner_task_id=task_id)
 
         # The scan itself may take minutes; each poll is its own short request,
@@ -227,6 +352,8 @@ class RedactService:
         entity_dict: dict[str, list[Entity]],
         blacklist: list[str],
     ) -> RedactOutput:
+        entity_dict = _filter_malformed(entity_dict)
+        entity_dict = _propagate_repeats(text, entity_dict)
         entity_dict = _filter_blacklisted(entity_dict, blacklist)
         redacted_text = _redact_text(
             text,

@@ -17,6 +17,9 @@ class AppConfig(LlmConfig):
 
     gliner_api_base_url: str = Field(description="The Glen base API url")
     gliner_api_key: str = Field(description="The Gliner API key")
+    gliner_use_binary_upload: bool = Field(
+        description="Send the text to Gliner as an uploaded file instead of a JSON field",
+    )
     gliner_task_timeout_seconds: float = Field(
         description="Maximum seconds to wait for a Gliner extraction task to finish; a long document scans for minutes",
         default=3600.0,
@@ -102,6 +105,7 @@ class AppConfig(LlmConfig):
             gliner_http_timeout_seconds=float(os.getenv("GLINER_HTTP_TIMEOUT_SECONDS", "600.0")),
             gliner_poll_interval_seconds=float(os.getenv("GLINER_POLL_INTERVAL_SECONDS", "3.0")),
             gliner_api_key=get_env_or_throw("GLINER_API_KEY"),
+            gliner_use_binary_upload=os.getenv("GLINER_USE_BINARY_UPLOAD", "true").lower() == "true",
             # TEMPORARY: DOCLING_URL/DOCLING_API_KEY are not declared in
             # .env.schema, so varlock never supplies them and get_env_or_throw
             # aborts startup. Fall back to the field defaults until the schema
@@ -137,6 +141,7 @@ class AppConfig(LlmConfig):
             gliner_http_timeout_seconds={self.gliner_http_timeout_seconds},
             gliner_poll_interval_seconds={self.gliner_poll_interval_seconds},
             gliner_api_key={log_secret(self.gliner_api_key)},
+            gliner_use_binary_upload={self.gliner_use_binary_upload},
             docling_url={self.docling_url},
             docling_api_key={log_secret(self.docling_api_key)},
             docling_poll_interval_seconds={self.docling_poll_interval_seconds},
