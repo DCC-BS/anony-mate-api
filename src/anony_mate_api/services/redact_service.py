@@ -15,7 +15,7 @@ from fastapi import status
 from pydantic import ValidationError
 
 from anony_mate_api.models.error_codes import REDACT_ERROR, REDACT_TIMEOUT
-from anony_mate_api.models.gliner_models import GlinerInput, GlinerResponse
+from anony_mate_api.models.gliner_models import GlinerInput, GlinerResponse, GlinerTaskState
 from anony_mate_api.models.redact_models import Entity, RedactBatchInput, RedactInput, RedactOutput
 from anony_mate_api.utils import AppConfig
 
@@ -319,11 +319,11 @@ class RedactService:
         # so this budget is about the whole job, not one HTTP call.
         deadline = time.monotonic() + self.config.gliner_task_timeout_seconds
         while True:
-            state = (await self._get(f"/task/{task_id}")).json()
-            status_value = state.get("status")
+            state = GlinerTaskState.model_validate((await self._get(f"/task/{task_id}")).json())
+            status_value = state.status
 
             if on_progress:
-                on_progress(state.get("progress"))
+                on_progress(state.progress)
 
             if status_value == "finished":
                 break
@@ -331,7 +331,7 @@ class RedactService:
                 raise ApiErrorException({
                     "errorId": REDACT_ERROR,
                     "status": status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    "debugMessage": f"Gliner task failed: {state.get('error')}",
+                    "debugMessage": f"Gliner task failed: {state.error}",
                 })
             if time.monotonic() > deadline:
                 raise ApiErrorException({
@@ -344,7 +344,7 @@ class RedactService:
 
             await asyncio.sleep(self.config.gliner_poll_interval_seconds)
 
-        result = await self._get(f"/resource/{state['resource_id']}")
+        result = await self._get(f"/resource/{state.resource_id}")
         return GlinerResponse.model_validate(result.json())
 
     async def _extract_entities_batch(

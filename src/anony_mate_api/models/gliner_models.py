@@ -29,3 +29,18 @@ class GlinerResponse(BaseModel):
     # Only the streaming batch endpoint reports this; a task's progress is read
     # from the task itself while it runs.
     progress: GlinerProgress | None = None
+
+
+class GlinerTaskState(BaseModel):
+    """The state Gliner reports for a submitted extraction task while it runs."""
+
+    status: str = Field(description="Where the task stands: pending, running, finished or failed.")
+    progress: float | None = Field(
+        default=None,
+        description="Fraction of the work done, in [0, 1]; null while unknown",
+    )
+    error: str | None = Field(default=None, description="Set when the status is failed")
+    resource_id: str | None = Field(
+        default=None,
+        description="Set once finished: fetch `GET /resource/{resource_id}` exactly once",
+    )
