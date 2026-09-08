@@ -168,9 +168,13 @@ def _redact_text(text: str, entities: dict[str, list[Entity]], replacement_fn: C
 
 
 class RedactService:
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: AppConfig, transport: httpx.AsyncBaseTransport | None = None):
         self.config = config
-        self.client = httpx.AsyncClient(base_url=config.gliner_api_base_url, timeout=config.gliner_http_timeout_seconds)
+        self.client = httpx.AsyncClient(
+            base_url=config.gliner_api_base_url,
+            timeout=config.gliner_http_timeout_seconds,
+            transport=transport,
+        )
 
     async def close(self) -> None:
         await self.client.aclose()
