@@ -20,7 +20,7 @@ services:
   #   ports:
   #     - ${LLM_API_PORT}:8000
   #   environment:
-  #     - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+  #     - HF_TOKEN=${HF_TOKEN:-}
   #   runtime: nvidia
   #   deploy:
   #     resources:
@@ -31,7 +31,7 @@ services:
   #             capabilities: [gpu]
   #   ipc: host
   #   volumes:
-  #     - ${HUGGING_FACE_CACHE_DIR}:/root/.cache/huggingface
+  #     - ${HF_HOME:-${HOME:-/root}/.cache/huggingface}:/root/.cache/huggingface
   #   command: >
   #     --port 8000
   #     --model Qwen/Qwen3-32B-AWQ
