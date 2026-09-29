@@ -61,6 +61,15 @@ class AppConfig(LlmConfig):
         description="Docling table structure mode: fast or accurate",
         default="accurate",
     )
+    doctr_api_url: str = Field(description="The URL for dcc-doctr-api", default="http://localhost:8082")
+    doctr_http_timeout_seconds: float = Field(
+        description="Per-request HTTP timeout for docTR calls; one request carries a page's tiles",
+        default=600.0,
+    )
+    mark_author: str = Field(
+        description="Author written into every redaction mark, as an editor such as Kofax lists it",
+        default="Anonymate",
+    )
     conversion_max_concurrent: int = Field(
         description="Conversions run at once; Docling serves two, so a little overshoot keeps it fed",
         default=3,
@@ -122,6 +131,9 @@ class AppConfig(LlmConfig):
             docling_http_timeout_seconds=float(os.getenv("DOCLING_HTTP_TIMEOUT_SECONDS", "300.0")),
             docling_pdf_backend=os.getenv("DOCLING_PDF_BACKEND", "pypdfium2"),
             docling_table_mode=os.getenv("DOCLING_TABLE_MODE", "accurate"),
+            doctr_api_url=os.getenv("DOCTR_API_URL", "http://localhost:8082"),
+            doctr_http_timeout_seconds=float(os.getenv("DOCTR_HTTP_TIMEOUT_SECONDS", "600.0")),
+            mark_author=os.getenv("MARK_AUTHOR", "Anonymate"),
             conversion_max_concurrent=int(os.getenv("CONVERSION_MAX_CONCURRENT", "3")),
             conversion_max_queued=int(os.getenv("CONVERSION_MAX_QUEUED", "16")),
             redaction_max_concurrent=int(os.getenv("REDACTION_MAX_CONCURRENT", "32")),
@@ -155,6 +167,9 @@ class AppConfig(LlmConfig):
             docling_http_timeout_seconds={self.docling_http_timeout_seconds},
             docling_pdf_backend={self.docling_pdf_backend},
             docling_table_mode={self.docling_table_mode},
+            doctr_api_url={self.doctr_api_url},
+            doctr_http_timeout_seconds={self.doctr_http_timeout_seconds},
+            mark_author={self.mark_author},
             conversion_max_concurrent={self.conversion_max_concurrent},
             conversion_max_queued={self.conversion_max_queued},
             redaction_max_concurrent={self.redaction_max_concurrent},

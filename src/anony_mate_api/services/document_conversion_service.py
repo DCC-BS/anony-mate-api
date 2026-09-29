@@ -8,6 +8,7 @@ from typing import Any, final
 import httpx
 from dcc_backend_common.fastapi_error_handling import ApiErrorException
 from dcc_backend_common.logger import get_logger
+from docling_core.types.doc import DoclingDocument
 from fastapi import status
 from starlette.datastructures import UploadFile
 
@@ -24,6 +25,21 @@ logger = get_logger("document_conversion_service")
 
 # Marker docling inserts between pages; removed again once offsets are known.
 PAGE_BREAK_PLACEHOLDER = "<!-- docling-page -->"
+
+#: Languages docling's OCR reads.
+OCR_LANGUAGES = ["de", "en", "fr", "it"]
+
+
+def unescape_markdown(markdown: str) -> str:
+    r"""Undo the escaping docling puts in its markdown.
+
+    The text is read, never rendered, and an escape splits a word the model
+    would otherwise read whole ("GKZ\_Entwurf.doc").
+
+    >>> unescape_markdown(r"GKZ\_Entwurf.doc")
+    'GKZ_Entwurf.doc'
+    """
+    return markdown.replace(r"\_", "_")
 
 
 def split_pages(markdown: str) -> tuple[str, list[int]]:
@@ -314,7 +330,7 @@ class DocumentConversionService:
         response = await self._request("GET", f"/result/{task_id}")
         json_response = response.json()
         markdown = (json_response.get("document") or {}).get("md_content", "") or ""
-        text, page_offsets = split_pages(markdown)
+        text, page_offsets = split_pages(unescape_markdown(markdown))
         return ConversionResult(text=text, page_offsets=page_offsets)
 
     async def convert(
@@ -324,7 +340,6 @@ class DocumentConversionService:
         content_type: str | None = None,
         on_status: Callable[[str, int | None], None] | None = None,
     ) -> ConversionResult:
-        languages = ["de", "en", "fr", "it"]
         logger.debug("Received file for conversion", file_type=type(file).__name__)
 
         content, filename, content_type = await self._prepare_file_data(
@@ -340,7 +355,7 @@ class DocumentConversionService:
             "image_export_mode": "placeholder",
             "do_ocr": True,
             "ocr_preset": "rapidocr",
-            "ocr_lang": languages,
+            "ocr_lang": OCR_LANGUAGES,
             "table_mode": self.config.docling_table_mode,
             "pdf_backend": self.config.docling_pdf_backend,
             "md_page_break_placeholder": PAGE_BREAK_PLACEHOLDER,
@@ -349,3 +364,34 @@ class DocumentConversionService:
         task_id = await self.submit_async_task(files, options)
         await self.poll_task_status(task_id, on_status)
         return await self.fetch_task_result(task_id)
+
+    async def read_layout(
+        self,
+        pdf: bytes,
+        filename: str,
+        on_status: Callable[[str, int | None], None] | None = None,
+    ) -> DoclingDocument:
+        """Docling's layout of a PDF: its regions in reading order, and its pictures classified.
+
+        Its text is not used: the words and their places come from the text
+        layer and docTR (see ``pdf_marks.words``). OCR still runs, since a
+        region docling reads no text in is dropped, and on a scan that is
+        every region.
+        """
+        files = {"files": (filename, pdf, "application/pdf")}
+        options: dict[str, Any] = {
+            "to_formats": ["json"],
+            "image_export_mode": "placeholder",
+            "do_ocr": True,
+            "ocr_preset": "rapidocr",
+            "ocr_lang": OCR_LANGUAGES,
+            "do_table_structure": True,
+            "table_mode": self.config.docling_table_mode,
+            "do_picture_classification": True,
+            "pdf_backend": self.config.docling_pdf_backend,
+        }
+
+        task_id = await self.submit_async_task(files, options)
+        await self.poll_task_status(task_id, on_status)
+        response = await self._request("GET", f"/result/{task_id}")
+        return DoclingDocument.model_validate((response.json().get("document") or {}).get("json_content"))

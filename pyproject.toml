@@ -19,6 +19,11 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "returns>=0.26.0",
     "logfire>=4.22.0",
+    "stopwordsiso>=0.7.1",
+    "docling-parse>=7.20.0",
+    "pypdfium2>=5.13.0",
+    "pypdf>=6.19.0",
+    "numpy>=2.5.1",
 ]
 
 [project.urls]
