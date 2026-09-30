@@ -8,9 +8,16 @@ here; the marked file holds everything the original does, and a list of
 what in it is sensitive.
 
 Every field set is a standard one: the author (``/T``), a subject naming the
-kind of mark (``/Subj``), the category and the model's confidence as the
-comment (``/Contents``), when it was marked, and a colour per category, so a
-reviewer tells them apart at a glance.
+kind of mark (``/Subj``), the category, the model's confidence and the text
+the mark covers as the comment (``/Contents``), when it was marked, and a
+colour per category, so a reviewer tells them apart at a glance.
+
+The covered text is in the comment because a mark cannot always be read off
+the page: text the page does not paint — a scanner's layer, white on white,
+a name under a black bar — is marked where it stands, and a reviewer looking
+at the paper sees a mark on nothing. The text is already in the file it
+marks, so writing it in the comment gives nothing away, and applying the
+mark removes the annotation along with what it covers.
 """
 
 from dataclasses import dataclass
@@ -40,6 +47,10 @@ FILL = (0.0, 0.0, 0.0)
 #: Annotation flag "print": the mark shows when the page is printed.
 PRINT = 4
 
+#: Longest covered text written into a comment. A mark covers a name, not a
+#: paragraph, and a reader shows a comment in a small window.
+COMMENT_LIMIT = 120
+
 
 @dataclass(frozen=True)
 class Mark:
@@ -48,7 +59,7 @@ class Mark:
     box: Box
     label: str
     confidence: float
-    #: What the mark covers, for the report; never written into the PDF.
+    #: What the mark covers. Empty for a mark on a picture, which covers no text.
     text: str
 
 
@@ -91,11 +102,27 @@ def _redact(rect: tuple[float, float, float, float], mark: Mark, author: str, st
         NameObject("/F"): NumberObject(PRINT),
         NameObject("/T"): TextStringObject(author),
         NameObject("/Subj"): TextStringObject(f"Schwärzung: {mark.label}"),
-        NameObject("/Contents"): TextStringObject(f"{mark.label}, Konfidenz {mark.confidence:.2f}"),
+        NameObject("/Contents"): TextStringObject(_comment(mark)),
         NameObject("/NM"): TextStringObject(str(uuid4())),
         NameObject("/CreationDate"): TextStringObject(stamp),
         NameObject("/M"): TextStringObject(stamp),
     })
+
+
+def _comment(mark: Mark) -> str:
+    """What a reviewer reads on the mark: its category, how sure the model
+    was, and the text it covers.
+
+    >>> _comment(Mark(Box(1, 0, 0, 1, 1), "person", 0.98, "Ruth Zehnder"))
+    'person, Konfidenz 0.98: «Ruth Zehnder»'
+    """
+    said = f"{mark.label}, Konfidenz {mark.confidence:.2f}"
+    covered = " ".join(mark.text.split())
+    if not covered:
+        return said
+    if len(covered) > COMMENT_LIMIT:
+        covered = covered[: COMMENT_LIMIT - 1] + "…"
+    return f"{said}: «{covered}»"
 
 
 def _user_rect(page, box: Box) -> tuple[float, float, float, float]:

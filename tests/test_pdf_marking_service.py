@@ -1,7 +1,8 @@
-"""A PDF marked for redaction from end to end, with the three services it calls stood in for.
+"""A PDF marked for redaction from end to end, with the two services stood in for.
 
-The PDF, its flattening, its text layer and the marks are real; docling-serve,
-dcc-doctr-api and GLiNER answer from here.
+The PDF, its text layer and the marks are real; docling-serve and GLiNER
+answer from here, docling-serve with the words of the page as it would read
+them.
 """
 
 import asyncio
@@ -15,6 +16,13 @@ import pypdfium2.raw as raw
 import pytest
 from dcc_backend_common.fastapi_error_handling import ApiErrorException
 from docling_core.types.doc import BoundingBox, CoordOrigin, DocItemLabel, DoclingDocument, ProvenanceItem, Size
+from docling_core.types.doc.page import (
+    BoundingRectangle,
+    PdfPageBoundaryType,
+    PdfPageGeometry,
+    SegmentedPdfPage,
+    TextCell,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pypdf import PdfReader
@@ -24,9 +32,10 @@ from anony_mate_api.models.marked_pdf import MarkedPdf
 from anony_mate_api.models.redact_models import RedactFileOptions
 from anony_mate_api.routers import task_router
 from anony_mate_api.routers.redact_router import _marking_job
-from anony_mate_api.services.pdf_marking_service import PdfMarkingService, _picture_marks
+from anony_mate_api.services.document_conversion_service import ReadLayout
+from anony_mate_api.services.pdf_marking_service import PdfMarkingService, _picture_marks, merge_same
 from anony_mate_api.services.pdf_marks.box import Box
-from anony_mate_api.services.pdf_marks.ocr import DoctrClient
+from anony_mate_api.services.pdf_marks.marks import Mark
 from anony_mate_api.services.pdf_marks.words import Picture
 from anony_mate_api.services.redact_service import RedactService
 from anony_mate_api.services.task_store import LaneConfig, TaskStore
@@ -57,7 +66,7 @@ class Docling:
     def __init__(self) -> None:
         self.statuses: list[str] = []
 
-    async def read_layout(self, pdf: bytes, filename: str, on_status=None) -> DoclingDocument:
+    async def read_layout(self, pdf: bytes, filename: str, on_status=None) -> ReadLayout:
         if on_status:
             on_status("started", None)
         document = DoclingDocument(name=filename)
@@ -66,7 +75,7 @@ class Docling:
         document.add_text(
             label=DocItemLabel.TEXT, text="", prov=ProvenanceItem(page_no=1, bbox=region, charspan=(0, 0))
         )
-        return document
+        return ReadLayout(document=document, pages={1: served_page(pdf)})
 
 
 def gliner(request: httpx.Request) -> httpx.Response:
@@ -83,17 +92,66 @@ def gliner(request: httpx.Request) -> httpx.Response:
     )
 
 
-def doctr(request: httpx.Request) -> httpx.Response:
-    """docTR reading nothing: every word here is in the text layer. One page back per page sent."""
-    pdf = request.content[request.content.index(b"%PDF") :]
-    page = {
-        "name": "document.pdf",
-        "dimensions": [1684, 1190],
-        "orientation": {"value": None, "confidence": None},
-        "language": {"value": None, "confidence": None},
-        "items": [{"blocks": []}],
-    }
-    return httpx.Response(200, json=[page] * len(pdfium.PdfDocument(pdf)))
+def text_words(pdf: bytes) -> list[tuple[str, BoundingBox]]:
+    """Every word the page draws, with the box its characters stand in."""
+    page = pdfium.PdfDocument(pdf)[0]
+    height = page.get_size()[1]
+    textpage = page.get_textpage()
+    words: list[tuple[str, BoundingBox]] = []
+    letters, box = "", None
+    for index in range(textpage.count_chars() + 1):
+        character = textpage.get_text_range(index, 1) if index < textpage.count_chars() else " "
+        if character.strip():
+            left, bottom, right, top = textpage.get_charbox(index)
+            here = BoundingBox(l=left, t=height - top, r=right, b=height - bottom, coord_origin=CoordOrigin.TOPLEFT)
+            box = (
+                here
+                if box is None
+                else BoundingBox(
+                    l=min(box.l, here.l),
+                    t=min(box.t, here.t),
+                    r=max(box.r, here.r),
+                    b=max(box.b, here.b),
+                    coord_origin=CoordOrigin.TOPLEFT,
+                )
+            )
+            letters += character
+        elif letters and box is not None:
+            words.append((letters, box))
+            letters, box = "", None
+    return words
+
+
+def served_page(pdf: bytes) -> SegmentedPdfPage:
+    """The page as docling-serve reads it: every word with its own box."""
+    whole = BoundingBox(l=0, t=0, r=595, b=842, coord_origin=CoordOrigin.TOPLEFT)
+    return SegmentedPdfPage(
+        dimension=PdfPageGeometry(
+            angle=0,
+            rect=BoundingRectangle.from_bounding_box(whole),
+            boundary_type=PdfPageBoundaryType.CROP_BOX,
+            art_bbox=whole,
+            bleed_bbox=whole,
+            crop_bbox=whole,
+            media_bbox=whole,
+            trim_bbox=whole,
+        ),
+        word_cells=[
+            TextCell(
+                index=index,
+                text=text,
+                orig=text,
+                from_ocr=False,
+                rect=BoundingRectangle.from_bounding_box(box),
+            )
+            for index, (text, box) in enumerate(text_words(pdf))
+        ],
+        textline_cells=[],
+        char_cells=[],
+        has_words=True,
+        has_lines=False,
+        has_chars=False,
+    )
 
 
 def service() -> PdfMarkingService:
@@ -112,7 +170,6 @@ def service() -> PdfMarkingService:
     return PdfMarkingService(
         document_conversion_service=Docling(),  # ty: ignore[invalid-argument-type]
         redact_service=RedactService(config, transport=httpx.MockTransport(gliner)),
-        doctr_client=DoctrClient("http://doctr", 10, transport=httpx.MockTransport(doctr)),
         author="Anonymate",
     )
 
@@ -142,6 +199,26 @@ def test_the_blacklist_keeps_a_name_unmarked() -> None:
 
     assert marked.marks == 0
     assert "/Annots" not in PdfReader(BytesIO(marked.content)).pages[0]
+
+
+def test_a_name_read_twice_is_marked_once_over_both_readings() -> None:
+    """A page whose text layer is invisible holds every name twice: as text
+    nobody sees, and in the picture OCR read. One box goes over both."""
+    hidden = Mark(Box(1, 100, 100, 180, 107), "person", 0.67, NAME)
+    read = Mark(Box(1, 99, 96, 182, 111), "person", 0.73, NAME)
+
+    merged = merge_same([hidden, read])
+
+    assert len(merged) == 1
+    assert merged[0].box == Box(1, 99, 96, 182, 111)
+    assert merged[0].confidence == 0.73
+
+
+def test_two_names_next_to_each_other_stay_two_marks() -> None:
+    first = Mark(Box(1, 100, 100, 160, 112), "person", 0.9, "Hildegard")
+    second = Mark(Box(1, 165, 100, 220, 112), "person", 0.9, "Zwyssig")
+
+    assert len(merge_same([first, second])) == 2
 
 
 def test_a_signature_is_marked_whole_and_a_logo_is_not() -> None:

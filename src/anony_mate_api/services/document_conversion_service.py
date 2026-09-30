@@ -1,6 +1,7 @@
 import asyncio
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Any, final
@@ -9,6 +10,7 @@ import httpx
 from dcc_backend_common.fastapi_error_handling import ApiErrorException
 from dcc_backend_common.logger import get_logger
 from docling_core.types.doc import DoclingDocument
+from docling_core.types.doc.page import SegmentedPdfPage
 from fastapi import status
 from starlette.datastructures import UploadFile
 
@@ -25,6 +27,22 @@ logger = get_logger("document_conversion_service")
 
 # Marker docling inserts between pages; removed again once offsets are known.
 PAGE_BREAK_PLACEHOLDER = "<!-- docling-page -->"
+
+
+@dataclass(frozen=True)
+class ReadLayout:
+    """What docling read of a PDF, for marking it."""
+
+    document: DoclingDocument
+    #: Every word of a page and where it stands, by 1-based page number, when
+    #: the server was asked for them. Empty when it was not.
+    pages: dict[int, SegmentedPdfPage]
+
+
+#: The backend asked for when the words are wanted. pypdfium2 reads a page's
+#: text but measures no box for each word, so the answer would carry only the
+#: words OCR read and none of the ones the text layer draws.
+WORD_CELL_BACKEND = "dlparse_v4"
 
 #: Languages docling's OCR reads.
 OCR_LANGUAGES = ["de", "en", "fr", "it"]
@@ -370,28 +388,44 @@ class DocumentConversionService:
         pdf: bytes,
         filename: str,
         on_status: Callable[[str, int | None], None] | None = None,
-    ) -> DoclingDocument:
-        """Docling's layout of a PDF: its regions in reading order, and its pictures classified.
+    ) -> ReadLayout:
+        """Docling's reading of a PDF: its regions and pictures, and every word with its box.
 
-        Its text is not used: the words and their places come from the text
-        layer and docTR (see ``pdf_marks.words``). OCR still runs, since a
-        region docling reads no text in is dropped, and on a scan that is
-        every region.
+        Docling's own text is not used, only its layout: the words come from
+        ``word_boxes``, where the text layer and OCR have each put what they
+        read (see ``pdf_marks.words``).
         """
         files = {"files": (filename, pdf, "application/pdf")}
         options: dict[str, Any] = {
             "to_formats": ["json"],
             "image_export_mode": "placeholder",
             "do_ocr": True,
-            "ocr_preset": "rapidocr",
+            "ocr_preset": self.config.docling_ocr_preset,
             "ocr_lang": OCR_LANGUAGES,
             "do_table_structure": True,
             "table_mode": self.config.docling_table_mode,
             "do_picture_classification": True,
             "pdf_backend": self.config.docling_pdf_backend,
+            # Every word of every page, with the box it stands in. Only a
+            # docling-serve carrying the patch answers this.
+            "include_word_boxes": True,
         }
+        if self.config.docling_layout_preset:
+            options["layout_preset"] = self.config.docling_layout_preset
+        if options["pdf_backend"] != WORD_CELL_BACKEND:
+            logger.info(
+                "Reading with the backend that measures each word",
+                configured=options["pdf_backend"],
+                used=WORD_CELL_BACKEND,
+            )
+            options["pdf_backend"] = WORD_CELL_BACKEND
 
         task_id = await self.submit_async_task(files, options)
         await self.poll_task_status(task_id, on_status)
         response = await self._request("GET", f"/result/{task_id}")
-        return DoclingDocument.model_validate((response.json().get("document") or {}).get("json_content"))
+        document = (response.json().get("document") or {}).get("json_content")
+        pages = (response.json().get("document") or {}).get("word_boxes") or {}
+        return ReadLayout(
+            document=DoclingDocument.model_validate(document),
+            pages={int(number): SegmentedPdfPage.model_validate(page) for number, page in pages.items()},
+        )

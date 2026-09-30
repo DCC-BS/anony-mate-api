@@ -41,7 +41,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     document_conversion_service = container.document_conversion_service()
     await redact_service.close()
     await document_conversion_service.close()
-    await container.doctr_client().close()
     logger.info("Resources closed successfully")
 
 

@@ -54,17 +54,23 @@ class AppConfig(LlmConfig):
         default=300.0,
     )
     docling_pdf_backend: str = Field(
-        description="Docling PDF parsing backend; pypdfium2 is faster, docling_parse more thorough",
-        default="pypdfium2",
+        description=(
+            "Docling PDF parsing backend. Only a docling-parse backend measures a box for each word, "
+            "which marking a PDF needs"
+        ),
+        default="dlparse_v4",
     )
     docling_table_mode: str = Field(
         description="Docling table structure mode: fast or accurate",
         default="accurate",
     )
-    doctr_api_url: str = Field(description="The URL for dcc-doctr-api", default="http://localhost:8082")
-    doctr_http_timeout_seconds: float = Field(
-        description="Per-request HTTP timeout for docTR calls; one request carries a page's tiles",
-        default=600.0,
+    docling_ocr_preset: str = Field(
+        description="Docling OCR engine preset; pp-ocrv6 reads the words a page shows only as pixels",
+        default="rapidocr",
+    )
+    docling_layout_preset: str = Field(
+        description="Docling layout preset; empty leaves docling its own choice",
+        default="",
     )
     mark_author: str = Field(
         description="Author written into every redaction mark, as an editor such as Kofax lists it",
@@ -129,10 +135,10 @@ class AppConfig(LlmConfig):
             docling_poll_interval_seconds=float(os.getenv("DOCLING_POLL_INTERVAL_SECONDS", "3.0")),
             docling_conversion_timeout_seconds=float(os.getenv("DOCLING_CONVERSION_TIMEOUT_SECONDS", "1800.0")),
             docling_http_timeout_seconds=float(os.getenv("DOCLING_HTTP_TIMEOUT_SECONDS", "300.0")),
-            docling_pdf_backend=os.getenv("DOCLING_PDF_BACKEND", "pypdfium2"),
+            docling_pdf_backend=os.getenv("DOCLING_PDF_BACKEND", "dlparse_v4"),
             docling_table_mode=os.getenv("DOCLING_TABLE_MODE", "accurate"),
-            doctr_api_url=os.getenv("DOCTR_API_URL", "http://localhost:8082"),
-            doctr_http_timeout_seconds=float(os.getenv("DOCTR_HTTP_TIMEOUT_SECONDS", "600.0")),
+            docling_ocr_preset=os.getenv("DOCLING_OCR_PRESET", "rapidocr"),
+            docling_layout_preset=os.getenv("DOCLING_LAYOUT_PRESET", ""),
             mark_author=os.getenv("MARK_AUTHOR", "Anonymate"),
             conversion_max_concurrent=int(os.getenv("CONVERSION_MAX_CONCURRENT", "3")),
             conversion_max_queued=int(os.getenv("CONVERSION_MAX_QUEUED", "16")),
@@ -167,8 +173,6 @@ class AppConfig(LlmConfig):
             docling_http_timeout_seconds={self.docling_http_timeout_seconds},
             docling_pdf_backend={self.docling_pdf_backend},
             docling_table_mode={self.docling_table_mode},
-            doctr_api_url={self.doctr_api_url},
-            doctr_http_timeout_seconds={self.doctr_http_timeout_seconds},
             mark_author={self.mark_author},
             conversion_max_concurrent={self.conversion_max_concurrent},
             conversion_max_queued={self.conversion_max_queued},

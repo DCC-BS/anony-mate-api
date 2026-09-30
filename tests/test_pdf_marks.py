@@ -1,22 +1,25 @@
-"""Tests for the building blocks of a marked PDF: words, placing, marks and the docTR client."""
+"""Tests for the building blocks of a marked PDF: words, placing and marks."""
 
-import asyncio
 import ctypes
-import json
 from io import BytesIO
 
-import httpx
 import pypdfium2 as pdfium
 import pypdfium2.raw as raw
 import pytest
 from docling_core.types.doc import BoundingBox, CoordOrigin, DoclingDocument, ProvenanceItem, Size, TableItem
 from docling_core.types.doc.document import TableCell, TableData
+from docling_core.types.doc.page import (
+    BoundingRectangle,
+    PdfPageBoundaryType,
+    PdfPageGeometry,
+    SegmentedPdfPage,
+    TextCell,
+)
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import RectangleObject
 
 from anony_mate_api.services.pdf_marks.box import Box
 from anony_mate_api.services.pdf_marks.marks import Mark, annotate
-from anony_mate_api.services.pdf_marks.ocr import DoctrClient
 from anony_mate_api.services.pdf_marks.words import (
     Layout,
     TextUnit,
@@ -24,6 +27,7 @@ from anony_mate_api.services.pdf_marks.words import (
     _cell_boxes,
     group,
     padded,
+    read_layout,
     shown_words,
     unit_of,
 )
@@ -224,7 +228,9 @@ def test_a_mark_lands_on_the_word_whatever_the_rotation_and_crop(
     assert text_under_marks(marked).strip() == NAME
 
 
-def test_a_mark_carries_the_standard_fields_and_not_the_text() -> None:
+def test_a_mark_carries_the_standard_fields_and_the_text_it_covers() -> None:
+    """The text is in the comment: a mark on text the page does not paint
+    cannot be read off the page."""
     original = page_with_name()
 
     marked = annotate(original, [Mark(shown_box(original), "person", 0.93, NAME)], author="Anonymate")
@@ -232,81 +238,96 @@ def test_a_mark_carries_the_standard_fields_and_not_the_text() -> None:
     annotation = PdfReader(BytesIO(marked)).pages[0]["/Annots"][0].get_object()
     assert annotation["/Subtype"] == "/Redact"
     assert annotation["/T"] == "Anonymate"
-    assert annotation["/Contents"] == "person, Konfidenz 0.93"
+    assert annotation["/Contents"] == f"person, Konfidenz 0.93: «{NAME}»"
     assert annotation["/Subj"] == "Schwärzung: person"
-    assert not any("Zwyssig" in str(value) for value in annotation.values())
 
 
-# docTR over HTTP
+def test_a_mark_on_a_picture_says_only_what_it_is() -> None:
+    """A signature is no text, so there is nothing to quote."""
+    original = page_with_name()
+
+    marked = annotate(original, [Mark(shown_box(original), "signature", 0.41, "")], author="Anonymate")
+
+    annotation = PdfReader(BytesIO(marked)).pages[0]["/Annots"][0].get_object()
+    assert annotation["/Contents"] == "signature, Konfidenz 0.41"
 
 
-def answer(words: list[tuple[str, list[float]]], width: int, height: int) -> dict:
-    """dcc-doctr-api's answer for one tile, with these words on it."""
-    return {
-        "name": "tile.png",
-        "dimensions": [height, width],
-        "orientation": {"value": None, "confidence": None},
-        "language": {"value": None, "confidence": None},
-        "items": [
-            {
-                "blocks": [
-                    {
-                        "geometry": [0, 0, 1, 1],
-                        "objectness_score": 1.0,
-                        "lines": [
-                            {
-                                "geometry": [0, 0, 1, 1],
-                                "objectness_score": 1.0,
-                                "words": [
-                                    {
-                                        "value": value,
-                                        "geometry": geometry,
-                                        "objectness_score": 1.0,
-                                        "confidence": 0.99,
-                                        "crop_orientation": {"value": 0, "confidence": None},
-                                    }
-                                    for value, geometry in words
-                                ],
-                            }
-                        ],
-                    }
-                ]
-            }
-        ],
-    }
+# The words docling-serve hands back
 
 
-def doctr_answering(pages: list[dict], requests: list[bytes]) -> DoctrClient:
-    def handle(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/ocr"
-        requests.append(request.content)
-        return httpx.Response(200, text=json.dumps(pages))
+def served_page(cells: list[tuple[str, float, bool]]) -> SegmentedPdfPage:
+    """One page as docling-serve hands it back: its words, and its lines.
 
-    return DoctrClient("http://doctr", 10, transport=httpx.MockTransport(handle))
-
-
-def test_the_pdf_goes_whole_and_words_come_back_in_page_pixels() -> None:
-    turned = [0.5, 0.75, 0.5, 0.25, 0.55, 0.25, 0.55, 0.75]  # up the page, read bottom to top
-    requests: list[bytes] = []
-    client = doctr_answering(
-        [answer([("Hildegard", [0.1, 0.1, 0.3, 0.15]), ("Riehenring", turned)], 1000, 800)], requests
+    Args:
+        cells: The text of each word, where it starts across the page, and
+            whether OCR read it or the text layer drew it.
+    """
+    words = [
+        TextCell(
+            index=index,
+            text=text,
+            orig=text,
+            from_ocr=from_ocr,
+            rect=BoundingRectangle.from_bounding_box(
+                BoundingBox(l=left, t=100, r=left + 10 * len(text), b=112, coord_origin=CoordOrigin.TOPLEFT)
+            ),
+        )
+        for index, (text, left, from_ocr) in enumerate(cells)
+    ]
+    line = TextCell(
+        index=0,
+        text=" ".join(text for text, _, _ in cells),
+        orig="",
+        from_ocr=False,
+        rect=BoundingRectangle.from_bounding_box(
+            BoundingBox(l=0, t=98, r=595, b=114, coord_origin=CoordOrigin.TOPLEFT)
+        ),
+    )
+    return SegmentedPdfPage(
+        dimension=_page_geometry(),
+        word_cells=words,
+        textline_cells=[line],
+        char_cells=[],
+        has_words=True,
+        has_lines=True,
+        has_chars=False,
     )
 
-    [page] = asyncio.run(client.read_pdf(b"%PDF-1.7 ..."))
 
-    words = {w.text: w.box for line in page.lines for w in line}
-    assert len(requests) == 1 and b"%PDF-1.7 ..." in requests[0]
-    assert (page.width, page.height) == (1000, 800)
-    assert words["Hildegard"] == (100, 80, 300, 120)
-    assert words["Riehenring"] == (500, 200, 550, 600)
+def _page_geometry() -> PdfPageGeometry:
+    whole = BoundingBox(l=0, t=0, r=595, b=842, coord_origin=CoordOrigin.TOPLEFT)
+    return PdfPageGeometry(
+        angle=0,
+        rect=BoundingRectangle.from_bounding_box(whole),
+        boundary_type=PdfPageBoundaryType.CROP_BOX,
+        art_bbox=whole,
+        bleed_bbox=whole,
+        crop_bbox=whole,
+        media_bbox=whole,
+        trim_bbox=whole,
+    )
 
 
-def test_words_running_the_same_way_are_joined_into_one_line() -> None:
-    # Two words up the page, one after the other: docTR gives each its own line.
-    first = [0.5, 0.9, 0.5, 0.6, 0.53, 0.6, 0.53, 0.9]
-    second = [0.5, 0.58, 0.5, 0.3, 0.53, 0.3, 0.53, 0.58]
-    client = doctr_answering([answer([("Hildegard", first), ("Zwyssig", second)], 1000, 1000)], [])
+def one_page_document() -> DoclingDocument:
+    document = DoclingDocument(name="served.pdf")
+    document.add_page(page_no=1, size=Size(width=595, height=842))
+    return document
 
-    [page] = asyncio.run(client.read_pdf(b"%PDF"))
 
-    assert [[w.text for w in line] for line in page.lines] == [["Hildegard", "Zwyssig"]]
+def test_the_words_docling_serve_read_are_used_as_they_come() -> None:
+    """No file is parsed again and no OCR service is called."""
+    page = served_page([(NAME.split()[0], 60.0, False), (NAME.split()[1], 130.0, False)])
+
+    layout = read_layout(one_page_document(), {1: page})
+
+    assert [unit.text for unit in layout.units] == [NAME]
+
+
+def test_a_word_ocr_read_where_the_text_layer_draws_one_is_dropped() -> None:
+    """The same word from both sources is one word, decided by place."""
+    page = served_page([("Hildegard", 60.0, False), ("Hildegurd", 62.0, True), ("Zwyssig", 160.0, True)])
+
+    layout = read_layout(one_page_document(), {1: page})
+
+    assert "Hildegurd" not in " ".join(unit.text for unit in layout.units)
+    assert "Zwyssig" in " ".join(unit.text for unit in layout.units)

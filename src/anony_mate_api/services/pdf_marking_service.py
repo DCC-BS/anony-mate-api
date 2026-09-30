@@ -6,9 +6,9 @@ knows where it stands on the page. So each detection becomes a redaction mark
 on the original PDF, for a person to review and apply in an editor such as
 Kofax Power PDF.
 
-Four services take part: docling-serve for the layout and the pictures,
-dcc-doctr-api for the words only pixels show, GLiNER through ``RedactService``
-for what is sensitive, and this module to put the answers where they belong.
+Two services take part: docling-serve for the layout, the pictures and every
+word with its box, and GLiNER through ``RedactService`` for what is
+sensitive. This module puts the answers where they belong.
 """
 
 import asyncio
@@ -26,8 +26,7 @@ from anony_mate_api.models.marked_pdf import MarkedPdf
 from anony_mate_api.models.redact_models import RedactFileOptions, RedactInput
 from anony_mate_api.services.document_conversion_service import DocumentConversionService
 from anony_mate_api.services.pdf_marks.marks import Mark, annotate
-from anony_mate_api.services.pdf_marks.ocr import DoctrClient
-from anony_mate_api.services.pdf_marks.pdf import UnreadableDocument, flatten, in_pdfium, page_count
+from anony_mate_api.services.pdf_marks.pdf import UnreadableDocument, page_count
 from anony_mate_api.services.pdf_marks.words import Layout, Picture, TextUnit, read_layout
 from anony_mate_api.services.redact_service import RedactService
 
@@ -40,6 +39,12 @@ UNIT_SEPARATOR = "\n\n"
 #: Picture classes marked whole: a signature is no text to detect, so its
 #: class is all there is to go on.
 PICTURE_CLASSES = frozenset({"signature"})
+
+#: How much of the smaller of two marks the larger has to cover for the two to
+#: be one. A name read twice — once in a page's own invisible text layer, once
+#: from the pixels — is marked twice, in boxes of different height around the
+#: same words. Distinct names stand apart and are never this close.
+SAME_MARK = 0.6
 
 #: Lowest classifier score at which a picture counts as one of those classes.
 #: Any guess above it counts, not only the first: a signature the classifier
@@ -64,12 +69,10 @@ class PdfMarkingService:
         self,
         document_conversion_service: DocumentConversionService,
         redact_service: RedactService,
-        doctr_client: DoctrClient,
         author: str,
     ) -> None:
         self.document_conversion_service = document_conversion_service
         self.redact_service = redact_service
-        self.doctr_client = doctr_client
         self.author = author
 
     async def mark(
@@ -92,16 +95,19 @@ class PdfMarkingService:
         Raises:
             ApiErrorException: The PDF cannot be read completely, or a service failed.
         """
-        flattened = await in_pdfium(_flattened, pdf)
-        document = await self.document_conversion_service.read_layout(flattened, filename, on_status)
-        pages = await in_pdfium(page_count, flattened)
-        unread = [number for number in range(1, pages + 1) if number not in document.pages]
+        pages = _pages(pdf)
+        read = await self.document_conversion_service.read_layout(pdf, filename, on_status)
+        if not read.pages:
+            raise _unreadable(
+                "docling-serve returned no words: it does not answer include_word_boxes, which marking a PDF needs"
+            )
+        unread = [number for number in range(1, pages + 1) if number not in read.pages]
         if unread:
-            raise _unreadable(f"Docling did not read pages {unread}")
+            raise _unreadable(f"Docling read no words on pages {unread}")
 
-        layout = await read_layout(flattened, document, self.doctr_client)
+        layout = read_layout(read.document, read.pages)
         spans = await self._detect(layout.units, settings, on_progress)
-        marks = _picture_marks(layout.pictures) + _span_marks(layout, spans)
+        marks = merge_same(_picture_marks(layout.pictures) + _span_marks(layout, spans))
         logger.info("Marked PDF", filename=filename, pages=len(layout.page_sizes), marks=len(marks))
 
         marked = await asyncio.to_thread(annotate, pdf, marks, self.author)
@@ -176,6 +182,29 @@ def _span_marks(layout: Layout, spans: list[Span]) -> list[Mark]:
     ]
 
 
+def merge_same(marks: list[Mark]) -> list[Mark]:
+    """One mark where two cover the same words.
+
+    A page whose own text layer is invisible — a scan, a publication copy —
+    holds every name twice: once as text nobody sees, once in the picture OCR
+    read. Both have to go, and one box over both says so once. The box is the
+    union, so nothing either of them covered is left out.
+    """
+    merged: list[Mark] = []
+    for mark in marks:
+        for index, other in enumerate(merged):
+            if other.label != mark.label:
+                continue
+            if max(mark.box.covered_by(other.box), other.box.covered_by(mark.box)) < SAME_MARK:
+                continue
+            keep = other if other.confidence >= mark.confidence else mark
+            merged[index] = Mark(other.box.union(mark.box), keep.label, keep.confidence, keep.text)
+            break
+        else:
+            merged.append(mark)
+    return merged
+
+
 def _picture_marks(pictures: list[Picture]) -> list[Mark]:
     marks = []
     for picture in pictures:
@@ -186,9 +215,9 @@ def _picture_marks(pictures: list[Picture]) -> list[Mark]:
     return marks
 
 
-def _flattened(pdf: bytes) -> bytes:
+def _pages(pdf: bytes) -> int:
     try:
-        return flatten(pdf)
+        return page_count(pdf)
     except UnreadableDocument as error:
         raise _unreadable(str(error)) from error
 

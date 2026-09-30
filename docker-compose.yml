@@ -4,7 +4,10 @@ services:
       ports:
         - "${GLINER_PORT:-8081}:8000"
   docling-serve:
-      image: ghcr.io/dcc-bs/dcc-docling-serve-cpu:v1.30.0
+      # Marking a PDF needs a docling-serve that answers include_word_boxes
+      # and carries PP-OCRv6 and PP-DocLayoutV3; the published image does not
+      # yet. See dcc-docling-serve/plugins/word_boxes.py.
+      image: ${DOCLING_SERVE_IMAGE:-ghcr.io/dcc-bs/dcc-docling-serve-cpu:v1.30.0}
       container_name: docling-serve-anony-mate
       ports:
           - ${DOCLING_API_PORT:-5001}:5001
@@ -12,23 +15,11 @@ services:
           - DOCLING_MODELS_PATH=/models
           - DOCLING_CONFIG_FILE=/app/docling_config.json
           - DOCLING_SERVE_ENABLE_UI=true
+          - DOCLING_SERVE_ALLOW_EXTERNAL_PLUGINS=true
+          - DOCLING_SERVE_CUSTOM_LAYOUT_PRESETS={"ppdoclayout-v3":{"kind":"ppdoclayout-v3"}}
+          - HF_HOME=/models/huggingface
       volumes:
           - "${HOME:-/root}/.cache/docling:/models"
-  # Reads the words a PDF shows only as pixels, for PDFs returned with
-  # redaction marks (`marked_pdf`). Its own profile until the image is
-  # published: `docker compose --profile pdf-marks up`.
-  doctr-api:
-      image: ghcr.io/dcc-bs/dcc-doctr-api:latest
-      profiles: ["pdf-marks"]
-      ports:
-        - "${DOCTR_API_PORT:-8082}:8000"
-      deploy:
-        resources:
-          reservations:
-            devices:
-              - driver: nvidia
-                count: 1
-                capabilities: [gpu]
   # vllm:
   #   image: vllm/vllm-openai:v0.26.0
   #   container_name: vllm_anony_mate_backend

@@ -5,18 +5,20 @@ its words is, every word here carries its own box, and every character of a
 unit's text points at its word. A span of text found in a unit is placed on
 the page exactly: the boxes of the words it touches.
 
-Words come from two sources, each where it is right, decided per page by
-place, never by comparing text:
+Everything comes from docling-serve, which reads the file once and answers
+``include_word_boxes``. Its words are of two kinds, each kept where it is
+right, decided per page by place, never by comparing text:
 
-- text the page draws comes from the text layer (docling-parse): exact
-  letters, and the box measured for each word;
-- docTR reads the rendered page and adds the words the text layer draws
-  nothing at: scans, pictures, plans, stamps, outlines, labels at an angle;
+- text the page draws comes from the text layer: exact letters, and the box
+  measured for each word;
+- what only the pixels show — scans, pictures, plans, stamps, outlines,
+  labels at an angle — is read by OCR, and added where the text layer draws
+  nothing;
 - invisible text, the layer a scanner lays under its picture, is read as
   well, in units of its own: it is content of the file, left behind by
   whoever removes only what is marked, and it need not lie where its picture
-  shows the words. Kept apart, it neither doubles the words docTR reads in
-  the picture nor mixes into their text.
+  shows the words. Kept apart, it neither doubles the words OCR reads in the
+  picture nor mixes into their text.
 
 Docling's layout (from docling-serve) groups the words: its regions and their
 reading order, down to the single cell of a table. A word belongs to the
@@ -26,9 +28,7 @@ top, are one unit of text. Words in no region are read line by line.
 Boxes are in points from the top left of the page as shown, 1-based pages.
 """
 
-import asyncio
 from dataclasses import dataclass
-from io import BytesIO
 
 from docling_core.types.doc import (
     BoundingBox,
@@ -40,10 +40,8 @@ from docling_core.types.doc import (
     TableItem,
 )
 from docling_core.types.doc.page import PdfCellRenderingMode, PdfTextCell, SegmentedPdfPage
-from docling_parse.pdf_parser import DoclingPdfParser
 
 from anony_mate_api.services.pdf_marks.box import Box
-from anony_mate_api.services.pdf_marks.ocr import DoctrClient, OcrPage
 
 #: Every layer docling sorts content into. Headers, footers and stamps land in
 #: furniture, and they carry names as often as the body does.
@@ -65,6 +63,8 @@ class Word:
     box: Box
     #: False for text-layer text the page does not draw.
     drawn: bool = True
+    #: True for a word read from the pixels rather than drawn by the text layer.
+    read: bool = False
 
 
 @dataclass(frozen=True)
@@ -106,13 +106,13 @@ class Layout:
         return join_lines(touched)
 
 
-async def read_layout(pdf: bytes, document: DoclingDocument, ocr: DoctrClient) -> Layout:
-    """Every word ``pdf`` shows, grouped into units of text.
+def read_layout(document: DoclingDocument, pages: dict[int, SegmentedPdfPage]) -> Layout:
+    """Every word the document shows, grouped into units of text.
 
     Args:
-        pdf: The flattened PDF (see ``pdf.flatten``) ``document`` was made from.
-        document: Docling's reading of it, for the regions and pictures.
-        ocr: Reads the words the text layer does not draw.
+        document: Docling's reading of the file, for the regions and pictures.
+        pages: The pages docling-serve read, each with the words of the text
+            layer and the words OCR read on it.
     """
     page_sizes = {no: (page.size.width, page.size.height) for no, page in document.pages.items()}
     regions: list[Box] = []
@@ -127,19 +127,25 @@ async def read_layout(pdf: bytes, document: DoclingDocument, ocr: DoctrClient) -
         if isinstance(item, PictureItem):
             pictures += [Picture(box, _classes(item)) for box in boxes]
 
-    parsed = await asyncio.to_thread(_parse, pdf)
-    ocr_pages = await ocr.read_pdf(pdf)
     shown: list[list[Word]] = []
     hidden: list[list[Word]] = []
-    for page_no, ocr_page in enumerate(ocr_pages, start=1):
-        if page_no not in page_sizes:
-            continue
-        text = _text_lines(parsed.get(page_no), page_no)
-        read = _in_points(ocr_page, page_no, page_sizes[page_no])
-        shown += shown_words(text, read)
-        hidden += _only(text, drawn=False)
+    for page_no in page_sizes:
+        lines = _text_lines(pages.get(page_no), page_no)
+        on_show = _only(lines, drawn=True)
+        shown += shown_words(_read(on_show, read=False), _read(on_show, read=True))
+        hidden += _only(lines, drawn=False)
 
     return Layout(group(regions, shown) + group(regions, hidden), pictures, page_sizes)
+
+
+def _read(lines: list[list[Word]], read: bool) -> list[list[Word]]:
+    """The words of each line that OCR read, or the ones the text layer drew.
+
+    A line docling grouped by place can hold both, where OCR read a word the
+    text layer also draws, so they are told apart word by word.
+    """
+    picked = ([word for word in line if word.read == read] for line in lines)
+    return [line for line in picked if line]
 
 
 def shown_words(text: list[list[Word]], ocr: list[list[Word]]) -> list[list[Word]]:
@@ -244,15 +250,6 @@ def join_lines(boxes: list[Box]) -> list[Box]:
     return joined if len(joined) == len(boxes) else join_lines(joined)
 
 
-def _parse(pdf: bytes) -> dict[int, SegmentedPdfPage]:
-    """The text layer of every page: its words and text lines."""
-    document = DoclingPdfParser().load(path_or_stream=BytesIO(pdf))
-    try:
-        return dict(document.iterate_pages())
-    finally:
-        document.unload()
-
-
 def _text_lines(page: SegmentedPdfPage | None, page_no: int) -> list[list[Word]]:
     """The text layer's words, grouped by the text line they stand in, in the
     order the page draws them."""
@@ -265,22 +262,10 @@ def _text_lines(page: SegmentedPdfPage | None, page_no: int) -> list[list[Word]]
         if not cell.text.strip():
             continue
         invisible = isinstance(cell, PdfTextCell) and cell.rendering_mode == PdfCellRenderingMode.INVISIBLE
-        word = Word(cell.text, _rect_box(cell.rect, page_no, height), drawn=not invisible)
+        word = Word(cell.text, _rect_box(cell.rect, page_no, height), drawn=not invisible, read=bool(cell.from_ocr))
         line = next((index for index, box in enumerate(lines) if box.contains(*word.box.centre)), None)
         grouped.setdefault(line if line is not None else -1 - len(grouped), []).append(word)
     return list(grouped.values())
-
-
-def _in_points(page: OcrPage, page_no: int, size: tuple[float, float]) -> list[list[Word]]:
-    """docTR's lines on the page, their word boxes turned from pixels into points."""
-    sx, sy = page.width / size[0], page.height / size[1]
-    return [
-        [
-            Word(read.text, Box(page_no, read.box[0] / sx, read.box[1] / sy, read.box[2] / sx, read.box[3] / sy))
-            for read in line
-        ]
-        for line in page.lines
-    ]
 
 
 def _only(lines: list[list[Word]], drawn: bool) -> list[list[Word]]:
