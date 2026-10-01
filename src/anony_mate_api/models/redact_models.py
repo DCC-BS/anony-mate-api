@@ -20,7 +20,7 @@ class RedactInput(BaseModel):
         default=False,
     )
     drop_scraps: bool = Field(
-        description="Drop detections that are only stopwords or have no run of three letters or digits",
+        description="Drop detections that are only stopwords or have no run of two letters or digits",
         default=False,
     )
 
@@ -42,7 +42,7 @@ class RedactBatchInput(BaseModel):
         default=False,
     )
     drop_scraps: bool = Field(
-        description="Drop detections that are only stopwords or have no run of three letters or digits",
+        description="Drop detections that are only stopwords or have no run of two letters or digits",
         default=False,
     )
 
