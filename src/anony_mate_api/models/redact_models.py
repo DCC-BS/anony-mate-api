@@ -11,6 +11,18 @@ class RedactInput(BaseModel):
     )
     threshold: float = Field(description="Confidence threshold for redaction", default=0.8)
     blacklist: list[str] = Field(description="Blacklist of words to avoid redaction", default=[])
+    repeat_everywhere: bool = Field(
+        description=(
+            "Carry every detection to every place its text stands, whatever its label, and find it there however "
+            "the text breaks it (line breaks, hyphenation, letter spacing, accents, ligatures). For a copy nobody "
+            "reviews, such as a redacted PDF."
+        ),
+        default=False,
+    )
+    drop_scraps: bool = Field(
+        description="Drop detections that are only stopwords or have no run of two letters or digits",
+        default=False,
+    )
 
 
 class RedactBatchInput(BaseModel):
@@ -21,6 +33,18 @@ class RedactBatchInput(BaseModel):
     )
     threshold: float = Field(description="Confidence threshold for redaction", default=0.8)
     blacklist: list[str] = Field(description="Blacklist of words to avoid redaction", default=[])
+    repeat_everywhere: bool = Field(
+        description=(
+            "Carry every detection to every place its text stands, whatever its label, and find it there however "
+            "the text breaks it (line breaks, hyphenation, letter spacing, accents, ligatures). For a copy nobody "
+            "reviews, such as a redacted PDF."
+        ),
+        default=False,
+    )
+    drop_scraps: bool = Field(
+        description="Drop detections that are only stopwords or have no run of two letters or digits",
+        default=False,
+    )
 
 
 class Entity(GlinerEntity):
@@ -43,6 +67,14 @@ class RedactFileOptions(BaseModel):
     )
     threshold: float = Field(description="Confidence threshold for redaction", default=0.8)
     blacklist: list[str] = Field(description="Blacklist of words to avoid redaction", default=[])
+    marked_pdf: bool = Field(
+        description=(
+            "Return the PDF itself with a redaction mark (an ISO 32000 /Redact annotation) on everything "
+            "detected, instead of its text, for an editor such as Kofax Power PDF to review and apply. "
+            "Only for PDFs."
+        ),
+        default=False,
+    )
 
 
 class DocumentRedactOutput(BaseModel):

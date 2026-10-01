@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from anony_mate_api.models.error_codes import REDACT_ERROR, REDACT_TIMEOUT
 from anony_mate_api.models.gliner_models import GlinerInput, GlinerResponse, GlinerTaskState
 from anony_mate_api.models.redact_models import Entity, RedactBatchInput, RedactInput, RedactOutput
+from anony_mate_api.services.text_matching import find, is_scrap
 from anony_mate_api.utils import AppConfig
 
 logger = get_logger("redact_service")
@@ -85,42 +86,69 @@ REPEATING_LABELS = frozenset({"person", "organisation", "adresse", "ort", "e-mai
 _SURNAME = re.compile(r"^[^\W\d_][\w'\-]{2,}$")
 
 
-def _propagate_repeats(text: str, entities: dict[str, list[Entity]]) -> dict[str, list[Entity]]:
+def _propagate_repeats(
+    text: str, entities: dict[str, list[Entity]], everywhere: bool = False
+) -> dict[str, list[Entity]]:
     """Give every repeat of a detected mention the label it was given once.
 
     Both the whole mention and, for a person, its last name: "Andreas Mueller"
     detected once makes every later "Mueller" a person too. Positions already
     covered by a detection are left alone, whatever their label, so this only
     ever adds to what the model found.
+
+    ``everywhere`` carries every label, not only those that repeat as names
+    do, and finds a repeat however the text breaks it (see ``text_matching``):
+    for a copy nobody reviews, where one mention left standing gives the
+    rest away.
+
+    The longest mention is searched for first, so a repeat of "Andreas Mueller"
+    is taken whole before "Mueller" could claim its second half and leave the
+    first name standing; labels go in a fixed order, so the result is the same
+    on every run.
     """
     taken = [(entity.start, entity.end) for entity_list in entities.values() for entity in entity_list]
     grown = {label: list(entity_list) for label, entity_list in entities.items()}
+    labels = set(entities) if everywhere else REPEATING_LABELS & entities.keys()
 
-    for label in REPEATING_LABELS & entities.keys():
+    for label in sorted(labels):
         found = entities[label]
         confidence = min((entity.confidence for entity in found), default=1.0)
 
-        for needle in _repeatable_mentions(label, found):
-            # Not \b: a hyphen is a word boundary to it, so "Basel" would be
-            # taken out of "Basel-Stadt". A repeat only counts where the
-            # mention stands on its own.
-            for match in re.finditer(rf"(?<![\w'\-]){re.escape(needle)}(?![\w'\-])", text):
-                if any(match.start() < end and start < match.end() for start, end in taken):
+        for needle in sorted(_repeatable_mentions(label, found), key=lambda mention: (-len(mention), mention)):
+            for found_start, found_end in _repeats(needle, text, everywhere):
+                if any(found_start < end and start < found_end for start, end in taken):
                     continue
 
-                taken.append((match.start(), match.end()))
+                taken.append((found_start, found_end))
                 grown[label].append(
                     Entity(
                         label=label,
                         id=str(len(grown[label]) + 1),
-                        text=match.group(),
-                        start=match.start(),
-                        end=match.end(),
+                        text=text[found_start:found_end],
+                        start=found_start,
+                        end=found_end,
                         confidence=confidence,
                     )
                 )
 
     return grown
+
+
+def _repeats(needle: str, text: str, everywhere: bool) -> list[tuple[int, int]]:
+    if everywhere:
+        return find(needle, text)
+    # Not \b: a hyphen is a word boundary to it, so "Basel" would be taken
+    # out of "Basel-Stadt". A repeat only counts where the mention stands on
+    # its own.
+    return [(match.start(), match.end()) for match in re.finditer(rf"(?<![\w'\-]){re.escape(needle)}(?![\w'\-])", text)]
+
+
+def _filter_scraps(entities: dict[str, list[Entity]]) -> dict[str, list[Entity]]:
+    """Drop detections that are scraps no label can be ("für", "[dB]")."""
+    return {
+        label: [entity for entity in entity_list if not is_scrap(entity.text)]
+        for label, entity_list in entities.items()
+    }
 
 
 def _repeatable_mentions(label: str, entities: list[Entity]) -> set[str]:
@@ -149,17 +177,20 @@ def _filter_blacklisted(entities: dict[str, list[Entity]], blacklist: list[str])
 
 
 def _redact_text(text: str, entities: dict[str, list[Entity]], replacement_fn: Callable[[Entity], str]):
-    """
-    Redacts the text based on the entities in the GLiNER response.
-    """
+    """Replace every detection in the text with its placeholder.
 
+    Detections of different labels may overlap; the widest one at a position
+    stands for all of them, so no part of a covered mention is written out.
+    """
     sorted_entities = sorted(
         (entity for entities_list in entities.values() for entity in entities_list),
-        key=lambda e: e.start,
+        key=lambda e: (e.start, -e.end),
     )
     redacted_text = ""
     cursor = 0
     for entity in sorted_entities:
+        if entity.start < cursor:
+            continue
         redacted_text += text[cursor : entity.start]
         redacted_text += f"[{replacement_fn(entity)}]"
         cursor = entity.end
@@ -369,9 +400,13 @@ class RedactService:
         text: str,
         entity_dict: dict[str, list[Entity]],
         blacklist: list[str],
+        repeat_everywhere: bool = False,
+        drop_scraps: bool = False,
     ) -> RedactOutput:
         entity_dict = _filter_malformed(entity_dict)
-        entity_dict = _propagate_repeats(text, entity_dict)
+        if drop_scraps:
+            entity_dict = _filter_scraps(entity_dict)
+        entity_dict = _propagate_repeats(text, entity_dict, everywhere=repeat_everywhere)
         entity_dict = _filter_blacklisted(entity_dict, blacklist)
         redacted_text = _redact_text(
             text,
@@ -396,11 +431,15 @@ class RedactService:
         response = await self._extract_entities(gliner_input, on_progress)
         entity_dict = _create_entities_dict(response)
 
-        return self._redact_single(payload.text, entity_dict, payload.blacklist)
+        return self._redact_single(
+            payload.text, entity_dict, payload.blacklist, payload.repeat_everywhere, payload.drop_scraps
+        )
 
     async def redact_batch(self, payload: RedactBatchInput) -> list[RedactOutput]:
         responses = await self._extract_entities_batch(payload.texts, payload.entity_types, payload.threshold)
         return [
-            self._redact_single(text, _create_entities_dict(response), payload.blacklist)
+            self._redact_single(
+                text, _create_entities_dict(response), payload.blacklist, payload.repeat_everywhere, payload.drop_scraps
+            )
             for text, response in zip(payload.texts, responses, strict=True)
         ]

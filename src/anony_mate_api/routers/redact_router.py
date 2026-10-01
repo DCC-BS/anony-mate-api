@@ -1,11 +1,14 @@
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
+from dcc_backend_common.fastapi_error_handling import ApiErrorException
 from dcc_backend_common.logger import get_logger
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Form, Request, UploadFile
+from fastapi import APIRouter, Form, Request, UploadFile, status
 
 from anony_mate_api.container import Container
+from anony_mate_api.models.error_codes import INVALID_MIME_TYPE
+from anony_mate_api.models.marked_pdf import MarkedPdf
 from anony_mate_api.models.redact_models import (
     DocumentRedactOutput,
     RedactBatchInput,
@@ -16,6 +19,7 @@ from anony_mate_api.models.redact_models import (
 from anony_mate_api.models.tasks import TaskAccepted
 from anony_mate_api.routers._submission import client_key, queue_full_error
 from anony_mate_api.services.document_conversion_service import DocumentConversionService
+from anony_mate_api.services.pdf_marking_service import PdfMarkingService
 from anony_mate_api.services.redact_service import RedactService
 from anony_mate_api.services.task_store import QueueFullError, TaskData, TaskStore
 
@@ -78,10 +82,46 @@ def _document_job(
     return run
 
 
+def _marking_job(
+    pdf_marking_service: PdfMarkingService,
+    upload: tuple[bytes, str, str],
+    settings: RedactFileOptions,
+) -> Callable[[TaskData], Awaitable[MarkedPdf]]:
+    """Build the job that marks one uploaded PDF for redaction, instead of converting it to text.
+
+    It reports as the text job does: Docling's queue while the layout is read,
+    then the detection's progress.
+    """
+    content, filename, content_type = upload
+    if content_type != "application/pdf":
+        raise ApiErrorException({
+            "errorId": INVALID_MIME_TYPE,
+            "status": status.HTTP_400_BAD_REQUEST,
+            "debugMessage": f"Only a PDF can be returned marked, not {content_type}",
+        })
+
+    async def run(task: TaskData) -> MarkedPdf:
+        def report_layout(docling_status: str, queue_position: int | None) -> None:
+            task.status = "running" if docling_status == "started" else "pending"
+            task.queue_position = queue_position
+            task.touch()
+
+        def report_detection(progress: float | None) -> None:
+            task.status = "running"
+            task.queue_position = None
+            task.progress = progress
+            task.touch()
+
+        return await pdf_marking_service.mark(content, filename, settings, report_layout, report_detection)
+
+    return run
+
+
 @inject
 def create_router(
     redact_service: RedactService = Provide[Container.redact_service],
     document_conversion_service: DocumentConversionService = Provide[Container.document_conversion_service],
+    pdf_marking_service: PdfMarkingService = Provide[Container.pdf_marking_service],
     task_store: TaskStore = Provide[Container.task_store],
 ) -> APIRouter:
     logger.info("Creating redact router")
@@ -132,6 +172,10 @@ def create_router(
         The job holds a conversion slot for its whole life, redaction included.
         Docling has the fewest slots of the two services, and a second lane over
         the same instance would let more conversions run than it can serve.
+
+        With ``marked_pdf`` set, a PDF is not converted to text: it comes back
+        itself, with a redaction mark on everything detected (see
+        ``PdfMarkingService``), and the resource is served as the PDF.
         """
         settings = RedactFileOptions.model_validate_json(options)
         logger.info("Queueing document redaction", filename=file.filename, size=file.size)
@@ -140,7 +184,11 @@ def create_router(
         # background task runs.
         upload = await document_conversion_service.prepare_upload(file)
 
-        run = _document_job(document_conversion_service, redact_service, upload, settings)
+        run = (
+            _marking_job(pdf_marking_service, upload, settings)
+            if settings.marked_pdf
+            else _document_job(document_conversion_service, redact_service, upload, settings)
+        )
 
         try:
             task = task_store.submit(run, lane="convert", client=client_key(request))

@@ -1,6 +1,7 @@
 import asyncio
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Any, final
@@ -8,6 +9,8 @@ from typing import Any, final
 import httpx
 from dcc_backend_common.fastapi_error_handling import ApiErrorException
 from dcc_backend_common.logger import get_logger
+from docling_core.types.doc import DoclingDocument
+from docling_core.types.doc.page import SegmentedPdfPage
 from fastapi import status
 from starlette.datastructures import UploadFile
 
@@ -24,6 +27,37 @@ logger = get_logger("document_conversion_service")
 
 # Marker docling inserts between pages; removed again once offsets are known.
 PAGE_BREAK_PLACEHOLDER = "<!-- docling-page -->"
+
+
+@dataclass(frozen=True)
+class ReadLayout:
+    """What docling read of a PDF, for marking it."""
+
+    document: DoclingDocument
+    #: Every word of a page and where it stands, by 1-based page number, when
+    #: the server was asked for them. Empty when it was not.
+    pages: dict[int, SegmentedPdfPage]
+
+
+#: The backend asked for when the words are wanted. pypdfium2 reads a page's
+#: text but measures no box for each word, so the answer would carry only the
+#: words OCR read and none of the ones the text layer draws.
+WORD_CELL_BACKEND = "dlparse_v4"
+
+#: Languages docling's OCR reads.
+OCR_LANGUAGES = ["de", "en", "fr", "it"]
+
+
+def unescape_markdown(markdown: str) -> str:
+    r"""Undo the escaping docling puts in its markdown.
+
+    The text is read, never rendered, and an escape splits a word the model
+    would otherwise read whole ("GKZ\_Entwurf.doc").
+
+    >>> unescape_markdown(r"GKZ\_Entwurf.doc")
+    'GKZ_Entwurf.doc'
+    """
+    return markdown.replace(r"\_", "_")
 
 
 def split_pages(markdown: str) -> tuple[str, list[int]]:
@@ -314,7 +348,7 @@ class DocumentConversionService:
         response = await self._request("GET", f"/result/{task_id}")
         json_response = response.json()
         markdown = (json_response.get("document") or {}).get("md_content", "") or ""
-        text, page_offsets = split_pages(markdown)
+        text, page_offsets = split_pages(unescape_markdown(markdown))
         return ConversionResult(text=text, page_offsets=page_offsets)
 
     async def convert(
@@ -324,7 +358,6 @@ class DocumentConversionService:
         content_type: str | None = None,
         on_status: Callable[[str, int | None], None] | None = None,
     ) -> ConversionResult:
-        languages = ["de", "en", "fr", "it"]
         logger.debug("Received file for conversion", file_type=type(file).__name__)
 
         content, filename, content_type = await self._prepare_file_data(
@@ -339,13 +372,61 @@ class DocumentConversionService:
             "to_formats": ["md"],
             "image_export_mode": "placeholder",
             "do_ocr": True,
-            "ocr_preset": "rapidocr",
-            "ocr_lang": languages,
+            "ocr_preset": self.config.docling_text_ocr_preset,
+            "ocr_lang": OCR_LANGUAGES,
             "table_mode": self.config.docling_table_mode,
             "pdf_backend": self.config.docling_pdf_backend,
             "md_page_break_placeholder": PAGE_BREAK_PLACEHOLDER,
+            "md_compact_tables": True,
         }
 
         task_id = await self.submit_async_task(files, options)
         await self.poll_task_status(task_id, on_status)
         return await self.fetch_task_result(task_id)
+
+    async def read_layout(
+        self,
+        pdf: bytes,
+        filename: str,
+        on_status: Callable[[str, int | None], None] | None = None,
+    ) -> ReadLayout:
+        """Docling's reading of a PDF: its regions and pictures, and every word with its box.
+
+        Docling's own text is not used, only its layout: the words come from
+        ``word_boxes``, where the text layer and OCR have each put what they
+        read (see ``pdf_marks.words``).
+        """
+        files = {"files": (filename, pdf, "application/pdf")}
+        options: dict[str, Any] = {
+            "to_formats": ["json"],
+            "image_export_mode": "placeholder",
+            "do_ocr": True,
+            "ocr_preset": self.config.docling_ocr_preset,
+            "ocr_lang": OCR_LANGUAGES,
+            "do_table_structure": True,
+            "table_mode": self.config.docling_table_mode,
+            "do_picture_classification": True,
+            "pdf_backend": self.config.docling_pdf_backend,
+            # Every word of every page, with the box it stands in. Only a
+            # docling-serve carrying the patch answers this.
+            "include_word_boxes": True,
+        }
+        if self.config.docling_layout_preset:
+            options["layout_preset"] = self.config.docling_layout_preset
+        if options["pdf_backend"] != WORD_CELL_BACKEND:
+            logger.info(
+                "Reading with the backend that measures each word",
+                configured=options["pdf_backend"],
+                used=WORD_CELL_BACKEND,
+            )
+            options["pdf_backend"] = WORD_CELL_BACKEND
+
+        task_id = await self.submit_async_task(files, options)
+        await self.poll_task_status(task_id, on_status)
+        response = await self._request("GET", f"/result/{task_id}")
+        document = (response.json().get("document") or {}).get("json_content")
+        pages = (response.json().get("document") or {}).get("word_boxes") or {}
+        return ReadLayout(
+            document=DoclingDocument.model_validate(document),
+            pages={int(number): SegmentedPdfPage.model_validate(page) for number, page in pages.items()},
+        )

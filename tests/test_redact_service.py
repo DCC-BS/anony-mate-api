@@ -13,6 +13,7 @@ from anony_mate_api.services.redact_service import (
     _create_entities_dict,
     _filter_blacklisted,
     _filter_malformed,
+    _filter_scraps,
     _propagate_repeats,
     _redact_text,
     _repeatable_mentions,
@@ -142,6 +143,18 @@ def test_redact_text_keeps_text_before_first_and_after_last_entity() -> None:
     redacted = _redact_text(text, entities, replacement_fn=lambda e: f"{e.label}:{e.id}")
 
     assert redacted == "Vorher. [person:1]. Nachher."
+
+
+def test_redact_text_writes_nothing_of_a_covered_detection() -> None:
+    text = "Bahnhofstrasse 1, 4001 Basel."
+    entities = {
+        "adresse": [Entity(label="adresse", id="1", text=text[:-1], start=0, end=28, confidence=1.0)],
+        "plz": [Entity(label="plz", id="1", text="4001", start=18, end=22, confidence=1.0)],
+    }
+
+    redacted = _redact_text(text, entities, replacement_fn=lambda e: f"{e.label}:{e.id}")
+
+    assert redacted == "[adresse:1]."
 
 
 def _config() -> AppConfig:
@@ -350,3 +363,46 @@ def test_redact_batch_returns_one_output_per_text() -> None:
             await service.close()
 
     assert asyncio.run(scenario()) == ["Herr [person:1].", "Frau [person:1]."]
+
+
+def test_everywhere_carries_every_label_however_the_text_breaks_it():
+    """A redacted copy has no reviewer: a date left standing once gives it away."""
+    text = "Am 12. August 2024 im Kanton Basel-Landschaft. Am 12.\nAugust 2024 in BaselLandschaft."
+    entities = {
+        "datum": [Entity(label="datum", id="1", text="12. August 2024", start=3, end=18, confidence=0.9)],
+        "ort": [Entity(label="ort", id="1", text="Basel-Landschaft", start=29, end=45, confidence=0.9)],
+    }
+    grown = _propagate_repeats(text, entities, everywhere=True)
+
+    assert [e.text for e in grown["datum"]] == ["12. August 2024", "12.\nAugust 2024"]
+    assert [e.text for e in grown["ort"]] == ["Basel-Landschaft", "BaselLandschaft"]
+
+
+def test_a_repeated_full_name_is_taken_whole_not_by_its_surname():
+    """Were the surname searched for first, the second mention would lose only its last name."""
+    text = "Bauherrschaft: Hildegard Zwyssig. Unterschrift: Hildegard Zwyssig"
+    entities = {"person": [Entity(label="person", id="1", text="Hildegard Zwyssig", start=15, end=32, confidence=0.9)]}
+
+    for everywhere in (False, True):
+        grown = _propagate_repeats(text, entities, everywhere=everywhere)
+
+        assert [e.text for e in grown["person"]] == ["Hildegard Zwyssig", "Hildegard Zwyssig"]
+
+
+def test_by_default_only_names_repeat():
+    text = "Am 12. August 2024 und am 12. August 2024."
+    entities = {"datum": [Entity(label="datum", id="1", text="12. August 2024", start=3, end=18, confidence=0.9)]}
+
+    assert _propagate_repeats(text, entities) == entities
+
+
+def test_scraps_are_dropped():
+    entities = {
+        "organisation": [
+            Entity(label="organisation", id="1", text="für", start=0, end=3, confidence=0.6),
+            Entity(label="organisation", id="2", text="[d]", start=5, end=8, confidence=0.6),
+            Entity(label="organisation", id="3", text="GKZ", start=11, end=14, confidence=0.6),
+            Entity(label="organisation", id="4", text="AG", start=15, end=17, confidence=0.6),
+        ]
+    }
+    assert [e.text for e in _filter_scraps(entities)["organisation"]] == ["GKZ", "AG"]

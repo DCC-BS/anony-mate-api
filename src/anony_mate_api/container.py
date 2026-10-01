@@ -2,6 +2,7 @@ from dcc_backend_common.usage_tracking import UsageTrackingService
 from dependency_injector import containers, providers
 
 from anony_mate_api.services.document_conversion_service import DocumentConversionService
+from anony_mate_api.services.pdf_marking_service import PdfMarkingService
 from anony_mate_api.services.redact_service import RedactService
 from anony_mate_api.services.task_store import LaneConfig, TaskStore
 from anony_mate_api.utils.app_config import AppConfig
@@ -40,4 +41,10 @@ class Container(containers.DeclarativeContainer):
     )
     document_conversion_service: providers.Singleton[DocumentConversionService] = providers.Singleton(
         DocumentConversionService, config=app_config
+    )
+    pdf_marking_service: providers.Singleton[PdfMarkingService] = providers.Singleton(
+        PdfMarkingService,
+        document_conversion_service=document_conversion_service,
+        redact_service=redact_service,
+        author=app_config.provided.mark_author,
     )
