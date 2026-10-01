@@ -400,6 +400,8 @@ class DocumentConversionService:
         options: dict[str, Any] = {
             "to_formats": ["json"],
             "image_export_mode": "placeholder",
+            # Page and picture images would swell a scanned PDF's JSON by megabytes.
+            "include_images": False,
             "do_ocr": True,
             "ocr_preset": self.config.docling_ocr_preset,
             "ocr_lang": OCR_LANGUAGES,
