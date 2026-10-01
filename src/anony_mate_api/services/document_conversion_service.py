@@ -372,11 +372,12 @@ class DocumentConversionService:
             "to_formats": ["md"],
             "image_export_mode": "placeholder",
             "do_ocr": True,
-            "ocr_preset": "rapidocr",
+            "ocr_preset": self.config.docling_text_ocr_preset,
             "ocr_lang": OCR_LANGUAGES,
             "table_mode": self.config.docling_table_mode,
             "pdf_backend": self.config.docling_pdf_backend,
             "md_page_break_placeholder": PAGE_BREAK_PLACEHOLDER,
+            "md_compact_tables": True,
         }
 
         task_id = await self.submit_async_task(files, options)

@@ -68,6 +68,10 @@ class AppConfig(LlmConfig):
         description="Docling OCR engine preset; pp-ocrv6 reads the words a page shows only as pixels",
         default="rapidocr",
     )
+    docling_text_ocr_preset: str = Field(
+        description="Docling OCR engine preset for converting a document to text to review",
+        default="glm-ocr-remote",
+    )
     docling_layout_preset: str = Field(
         description="Docling layout preset; empty leaves docling its own choice",
         default="",
@@ -138,6 +142,7 @@ class AppConfig(LlmConfig):
             docling_pdf_backend=os.getenv("DOCLING_PDF_BACKEND", "dlparse_v4"),
             docling_table_mode=os.getenv("DOCLING_TABLE_MODE", "accurate"),
             docling_ocr_preset=os.getenv("DOCLING_OCR_PRESET", "rapidocr"),
+            docling_text_ocr_preset=os.getenv("DOCLING_TEXT_OCR_PRESET", "glm-ocr-remote"),
             docling_layout_preset=os.getenv("DOCLING_LAYOUT_PRESET", ""),
             mark_author=os.getenv("MARK_AUTHOR", "Anonymate"),
             conversion_max_concurrent=int(os.getenv("CONVERSION_MAX_CONCURRENT", "3")),
