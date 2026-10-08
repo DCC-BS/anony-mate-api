@@ -7,7 +7,7 @@ services:
       # Marking a PDF needs a docling-serve that answers include_word_boxes
       # and carries PP-OCRv6 and PP-DocLayoutV3; the published image does not
       # yet. See dcc-docling-serve/plugins/word_boxes.py.
-      image: ${DOCLING_SERVE_IMAGE:-ghcr.io/dcc-bs/dcc-docling-serve-cpu:v1.30.0}
+      image: ${DOCLING_SERVE_IMAGE:-ghcr.io/dcc-bs/dcc-docling-serve-cpu:latest}
       container_name: docling-serve-anony-mate
       ports:
           - ${DOCLING_API_PORT:-5001}:5001
