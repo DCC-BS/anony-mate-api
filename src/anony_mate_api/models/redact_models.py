@@ -90,7 +90,7 @@ class RedactFileOptions(BaseModel):
 class MarkBox(BaseModel):
     """One marked area of a page, in points from the top left."""
 
-    page: int = Field(description="1-based page the box stands on")
+    page: int = Field(description="1-based page the box stands on", ge=1)
     left: float = Field(description="Distance from the page's left edge, in points")
     top: float = Field(description="Distance from the page's top edge, in points")
     right: float = Field(description="Distance of the right edge, in points")

@@ -277,29 +277,40 @@ def _span_marks(mentions: list[Mention], layout: Layout) -> list[Mark]:
 
 
 def merge_same(marks: list[Mark]) -> list[Mark]:
-    """One mark where two cover the same words.
+    """One mark where two cover the same words *and* belong to one mention.
 
     A page whose own text layer is invisible — a scan, a publication copy —
     holds every name twice: once as text nobody sees, once in the picture OCR
     read. Both have to go, and one box over both says so once. The box is the
-    union, so nothing either of them covered is left out. The mark that
-    noticed them first stays the owner of the id, so the group it names keeps
-    one member more rather than losing its name.
+    union, so nothing either of them covered is left out.
+
+    Only marks of the same mention are folded: the mention is what a review
+    decides about, and two mentions of one label — the model may see "Max"
+    and "Max Mustermann" next to each other as two — stay two, each with its
+    id, whatever their boxes cover of one another.
     """
     merged: list[Mark] = []
     for mark in marks:
         for index, other in enumerate(merged):
             if other.label != mark.label:
                 continue
-            if max(mark.box.covered_by(other.box), other.box.covered_by(mark.box)) < SAME_MARK:
+            # Folding needs the two to be one reading of one mention. A named
+            # mark is a mention of its own: the same id folds outright (the
+            # invisible layer and what the pixels read of one detection),
+            # another mention's id never folds, whatever their boxes cover.
+            # An id-less mark (a picture's, where there is nothing to be a
+            # mention of) folds on coverage, the only thing it has.
+            if mark.id:
+                if mark.id != other.id:
+                    continue
+            elif other.id or max(mark.box.covered_by(other.box), other.box.covered_by(mark.box)) < SAME_MARK:
                 continue
-            keep = other if other.confidence >= mark.confidence else mark
             merged[index] = Mark(
                 other.box.union(mark.box),
-                keep.label,
-                keep.confidence,
-                keep.text,
-                id=other.id or mark.id,
+                other.label,
+                max(other.confidence, mark.confidence),
+                other.text,
+                id=other.id,
             )
             break
         else:

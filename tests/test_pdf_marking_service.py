@@ -228,15 +228,17 @@ def test_the_blacklist_keeps_a_name_unmarked() -> None:
 
 def test_a_name_read_twice_is_marked_once_over_both_readings() -> None:
     """A page whose text layer is invisible holds every name twice: as text
-    nobody sees, and in the picture OCR read. One box goes over both."""
-    hidden = Mark(Box(1, 100, 100, 180, 107), "person", 0.67, NAME)
-    read = Mark(Box(1, 99, 96, 182, 111), "person", 0.73, NAME)
+    nobody sees, and in the picture OCR read. One box goes over both —
+    both marks carry the mention they belong to, so the fold keeps its id."""
+    hidden = Mark(Box(1, 100, 100, 180, 107), "person", 0.67, NAME, id="d1")
+    read = Mark(Box(1, 99, 96, 182, 111), "person", 0.73, NAME, id="d1")
 
     merged = merge_same([hidden, read])
 
     assert len(merged) == 1
     assert merged[0].box == Box(1, 99, 96, 182, 111)
     assert merged[0].confidence == 0.73
+    assert merged[0].id == "d1"
 
 
 def test_two_names_next_to_each_other_stay_two_marks() -> None:
@@ -244,6 +246,19 @@ def test_two_names_next_to_each_other_stay_two_marks() -> None:
     second = Mark(Box(1, 165, 100, 220, 112), "person", 0.9, "Zwyssig")
 
     assert len(merge_same([first, second])) == 2
+
+
+def test_two_mentions_of_one_label_covering_each_other_stay_two() -> None:
+    """The model may see "Max" and "Max Mustermann" — both person, covering
+    the same words — as two mentions. The review decides about each, so the
+    fold does not take the second into the first."""
+    short = Mark(Box(1, 100, 100, 220, 112), "person", 0.9, "Max", id="d1")
+    long = Mark(Box(1, 100, 100, 340, 112), "person", 0.8, "Max Mustermann", id="d2")
+
+    merged = merge_same([short, long])
+
+    assert len(merged) == 2
+    assert {mark.id for mark in merged} == {"d1", "d2"}
 
 
 def test_a_signature_is_marked_whole_and_a_logo_is_not() -> None:
