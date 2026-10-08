@@ -12,7 +12,8 @@ from fastapi import APIRouter, Response, status
 
 from anony_mate_api.container import Container
 from anony_mate_api.models.error_codes import TASK_NOT_FOUND
-from anony_mate_api.models.marked_pdf import MarkedPdf
+from anony_mate_api.models.marked_pdf import MarkedPdf, PdfAnnotations
+from anony_mate_api.models.redact_models import PdfAnnotationsOutput
 from anony_mate_api.models.tasks import TaskState
 from anony_mate_api.services.task_store import TaskStore
 
@@ -71,6 +72,11 @@ def create_router(task_store: TaskStore = Provide[Container.task_store]) -> APIR
                     "X-Mark-Count": str(result.marks),
                 },
             )
+
+        if isinstance(result, PdfAnnotations):
+            # The marks as the contract reads them: every box a named thing,
+            # not a bare array a caller has to know the order of.
+            return PdfAnnotationsOutput.of(result)
 
         return result
 

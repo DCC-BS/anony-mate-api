@@ -8,13 +8,14 @@ from fastapi import APIRouter, Form, Request, UploadFile, status
 
 from anony_mate_api.container import Container
 from anony_mate_api.models.error_codes import INVALID_MIME_TYPE
-from anony_mate_api.models.marked_pdf import MarkedPdf
+from anony_mate_api.models.marked_pdf import MarkedPdf, PdfAnnotations
 from anony_mate_api.models.redact_models import (
     DocumentRedactOutput,
     RedactBatchInput,
     RedactFileOptions,
     RedactInput,
     RedactOutput,
+    RedactPdfAnnotateInput,
 )
 from anony_mate_api.models.tasks import TaskAccepted
 from anony_mate_api.routers._submission import client_key, queue_full_error
@@ -86,11 +87,13 @@ def _marking_job(
     pdf_marking_service: PdfMarkingService,
     upload: tuple[bytes, str, str],
     settings: RedactFileOptions,
-) -> Callable[[TaskData], Awaitable[MarkedPdf]]:
+) -> Callable[[TaskData], Awaitable[MarkedPdf | PdfAnnotations]]:
     """Build the job that marks one uploaded PDF for redaction, instead of converting it to text.
 
     It reports as the text job does: Docling's queue while the layout is read,
-    then the detection's progress.
+    then the detection's progress. With ``pdf_annotations`` set, the job
+    answers with the marks alone, for the caller to draw over the file it
+    keeps.
     """
     content, filename, content_type = upload
     if content_type != "application/pdf":
@@ -100,7 +103,7 @@ def _marking_job(
             "debugMessage": f"Only a PDF can be returned marked, not {content_type}",
         })
 
-    async def run(task: TaskData) -> MarkedPdf:
+    async def run(task: TaskData) -> MarkedPdf | PdfAnnotations:
         def report_layout(docling_status: str, queue_position: int | None) -> None:
             task.status = "running" if docling_status == "started" else "pending"
             task.queue_position = queue_position
@@ -115,6 +118,40 @@ def _marking_job(
         return await pdf_marking_service.mark(content, filename, settings, report_layout, report_detection)
 
     return run
+
+
+def _annotate_job(
+    pdf_marking_service: PdfMarkingService,
+    upload: tuple[bytes, str, str],
+    payload: RedactPdfAnnotateInput,
+) -> Callable[[TaskData], Awaitable[MarkedPdf]]:
+    """Build the job that writes a review's marks onto one uploaded PDF."""
+    content, filename, _content_type = upload
+
+    async def run(task: TaskData) -> MarkedPdf:
+        task.status = "running"
+        task.touch()
+        return await pdf_marking_service.write_annotations(content, filename, payload.annotations)
+
+    return run
+
+
+def _submit(
+    task_store: TaskStore,
+    run: Callable[[TaskData], Awaitable[object]],
+    lane: str,
+    client: str,
+) -> TaskAccepted:
+    """Puts a job in its lane and answers with where to poll it.
+
+    All the file routes share it; their differences are in the job, not in
+    this exchange.
+    """
+    try:
+        task = task_store.submit(run, lane=lane, client=client)
+    except QueueFullError as error:
+        raise queue_full_error(error) from error
+    return TaskAccepted(task_id=task.id)
 
 
 @inject
@@ -146,12 +183,7 @@ def create_router(
 
             return await redact_service.redact(payload, report)
 
-        try:
-            task = task_store.submit(run, lane="redact", client=client_key(request))
-        except QueueFullError as error:
-            raise queue_full_error(error) from error
-
-        return TaskAccepted(task_id=task.id)
+        return _submit(task_store, run, "redact", client_key(request))
 
     @router.post(
         "/file/async",
@@ -173,9 +205,10 @@ def create_router(
         Docling has the fewest slots of the two services, and a second lane over
         the same instance would let more conversions run than it can serve.
 
-        With ``marked_pdf`` set, a PDF is not converted to text: it comes back
-        itself, with a redaction mark on everything detected (see
-        ``PdfMarkingService``), and the resource is served as the PDF.
+        With ``marked_pdf`` or ``pdf_annotations`` set, a PDF is not converted
+        to text: it is marked for redaction (see ``PdfMarkingService``). The
+        first comes back as the PDF itself, the second as the marks alone, for
+        a caller that keeps the file and draws them over it.
         """
         settings = RedactFileOptions.model_validate_json(options)
         logger.info("Queueing document redaction", filename=file.filename, size=file.size)
@@ -184,18 +217,43 @@ def create_router(
         # background task runs.
         upload = await document_conversion_service.prepare_upload(file)
 
-        run = (
+        marking = settings.marked_pdf or settings.pdf_annotations
+        return _submit(
+            task_store,
             _marking_job(pdf_marking_service, upload, settings)
-            if settings.marked_pdf
-            else _document_job(document_conversion_service, redact_service, upload, settings)
+            if marking
+            else _document_job(document_conversion_service, redact_service, upload, settings),
+            "convert",
+            client_key(request),
         )
 
-        try:
-            task = task_store.submit(run, lane="convert", client=client_key(request))
-        except QueueFullError as error:
-            raise queue_full_error(error) from error
+    @router.post(
+        "/pdf/annotate/async",
+        summary="Submit an annotated PDF to be written, and poll for it",
+        status_code=202,
+    )
+    async def annotate_pdf_async(
+        file: UploadFile,
+        options: Annotated[str, Form(description="A RedactPdfAnnotateInput object, JSON encoded")],
+        request: Request,
+    ) -> TaskAccepted:
+        """Write the reviewed marks of a PDF onto the PDF itself.
 
-        return TaskAccepted(task_id=task.id)
+        The marks are the ones a review of the annotations has settled on:
+        their ids go onto the annotations' ``/NM`` so a later pass recognises
+        them, and an overlay is written where a mark carries one. The PDF
+        comes back served as itself, named ``<name>.markiert.pdf``.
+        """
+        payload = RedactPdfAnnotateInput.model_validate_json(options)
+        logger.info("Queueing annotated PDF", filename=file.filename, size=file.size, marks=len(payload.annotations))
+
+        upload = await document_conversion_service.prepare_upload(file)
+        return _submit(
+            task_store,
+            _annotate_job(pdf_marking_service, upload, payload),
+            "convert",
+            client_key(request),
+        )
 
     logger.info("redact router configured")
     return router

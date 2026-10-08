@@ -61,6 +61,13 @@ class Mark:
     confidence: float
     #: What the mark covers. Empty for a mark on a picture, which covers no text.
     text: str
+    #: What detection this box belongs to, so the boxes of one mention stay
+    #: one mark to a caller that draws them. Empty when nobody asked: the
+    #: annotation then carries a fresh /NM of its own.
+    id: str = ""
+    #: Text written into the area when the mark is applied, instead of the
+    #: plain fill. Only a caller that has reviewed the mark sets one.
+    overlay: str | None = None
 
 
 def annotate(original: bytes, marks: list[Mark], author: str, when: datetime | None = None) -> bytes:
@@ -69,15 +76,23 @@ def annotate(original: bytes, marks: list[Mark], author: str, when: datetime | N
     The boxes are measured on the page as it is shown, upright; they are
     turned back into each page's own coordinates, whatever its rotation and
     crop box.
+
+    Marks that belong to one detection (a name over two lines) arrive as one
+    mark per box carrying the detection's id; each box becomes its own
+    annotation, named ``<id>`` for the first box and ``<id>:<box>`` for the
+    rest, so the boxes of one mark stay named after it and no two
+    annotations share a /NM.
     """
     reader = PdfReader(BytesIO(original))
     if reader.is_encrypted and not reader.decrypt(""):
         raise ValueError("the PDF needs a password to open")
     writer = PdfWriter(clone_from=reader)
     stamp = _pdf_date(when or datetime.now(UTC))
+    named: dict[str, int] = {}
     for mark in marks:
         page = writer.pages[mark.box.page_no - 1]
-        reference = writer._add_object(_redact(_user_rect(page, mark.box), mark, author, stamp))
+        name = _annotation_name(mark, named)
+        reference = writer._add_object(_redact(_user_rect(page, mark.box), mark, author, stamp, name))
         existing = page.get("/Annots")
         annotations = existing.get_object() if existing is not None else None
         if isinstance(annotations, ArrayObject):
@@ -89,9 +104,24 @@ def annotate(original: bytes, marks: list[Mark], author: str, when: datetime | N
     return output.getvalue()
 
 
-def _redact(rect: tuple[float, float, float, float], mark: Mark, author: str, stamp: str) -> DictionaryObject:
+def _annotation_name(mark: Mark, named: dict[str, int]) -> str:
+    """The /NM of one box of a mark: the mark's id, counted up per extra box."""
+    if not mark.id:
+        return str(uuid4())
+    count = named.get(mark.id, 0)
+    named[mark.id] = count + 1
+    return mark.id if count == 0 else f"{mark.id}:{count}"
+
+
+def _redact(
+    rect: tuple[float, float, float, float],
+    mark: Mark,
+    author: str,
+    stamp: str,
+    name: str,
+) -> DictionaryObject:
     left, bottom, right, top = rect
-    return DictionaryObject({
+    fields: DictionaryObject = DictionaryObject({
         NameObject("/Type"): NameObject("/Annot"),
         NameObject("/Subtype"): NameObject("/Redact"),
         NameObject("/Rect"): _numbers(rect),
@@ -103,10 +133,16 @@ def _redact(rect: tuple[float, float, float, float], mark: Mark, author: str, st
         NameObject("/T"): TextStringObject(author),
         NameObject("/Subj"): TextStringObject(f"Schwärzung: {mark.label}"),
         NameObject("/Contents"): TextStringObject(_comment(mark)),
-        NameObject("/NM"): TextStringObject(str(uuid4())),
+        NameObject("/NM"): TextStringObject(name),
         NameObject("/CreationDate"): TextStringObject(stamp),
         NameObject("/M"): TextStringObject(stamp),
     })
+    if mark.overlay:
+        # PDF 2.0's overlay on an applied redaction. Editors that read it
+        # write the text into the black; the rest fill, which is safe either
+        # way — the text under the mark is removed before anything is drawn.
+        fields[NameObject("/OverlayText")] = TextStringObject(mark.overlay)
+    return fields
 
 
 def _comment(mark: Mark) -> str:

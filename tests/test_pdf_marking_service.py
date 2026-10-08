@@ -28,8 +28,8 @@ from fastapi.testclient import TestClient
 from pypdf import PdfReader
 
 from anony_mate_api.models.error_codes import INVALID_MIME_TYPE
-from anony_mate_api.models.marked_pdf import MarkedPdf
-from anony_mate_api.models.redact_models import RedactFileOptions
+from anony_mate_api.models.marked_pdf import MarkAnnotation, MarkedPdf, PdfAnnotations
+from anony_mate_api.models.redact_models import MarkAnnotationInput, MarkBox, RedactFileOptions, RedactPdfAnnotateInput
 from anony_mate_api.routers import task_router
 from anony_mate_api.routers.redact_router import _marking_job
 from anony_mate_api.services.document_conversion_service import ReadLayout
@@ -43,6 +43,29 @@ from anony_mate_api.utils.app_config import AppConfig
 
 NAME = "Hildegard Zwyssig"
 LINES = ["Baugesuch Nr. 4711", f"Bauherrschaft: {NAME}, Riehenring 7", f"Unterschrift: {NAME}"]
+
+
+def result_content(result: MarkedPdf) -> PdfReader:
+    """The marked PDF, read back."""
+    return PdfReader(BytesIO(result.content))
+
+
+def textpage_of(content: bytes):
+    """The first page's text page, to read what a mark covers."""
+    return pdfium.PdfDocument(content)[0].get_textpage()
+
+
+def annotations_of_first_page(pdf: PdfReader) -> list[dict]:
+    """A reader's first page's annotations, read out.
+
+    ``/Annots`` is typed as a bare ``PdfObject``, so the read goes over the
+    checker's head — the tests would be blind, not wrong.
+    """
+    annots = pdf.pages[0]["/Annots"]
+    return [
+        a.get_object()
+        for a in annots  # ty: ignore[not-iterable]
+    ]
 
 
 def make_pdf() -> bytes:
@@ -181,11 +204,12 @@ def test_every_mention_of_a_detected_name_is_marked_on_the_original() -> None:
     marked = asyncio.run(
         service().mark(original, "baugesuch.pdf", RedactFileOptions(entity_types=["person"]), None, progress.append)
     )
+    assert isinstance(marked, MarkedPdf)
 
     assert marked.filename == "baugesuch.markiert.pdf"
     assert marked.marks == 2
     textpage = pdfium.PdfDocument(original)[0].get_textpage()
-    annotations = [a.get_object() for a in PdfReader(BytesIO(marked.content)).pages[0]["/Annots"]]
+    annotations = annotations_of_first_page(result_content(marked))
     under = [textpage.get_text_bounded(*[float(v) for v in a["/Rect"]]).strip(" ,") for a in annotations]
     assert under == [NAME, NAME]
     assert {a["/Subtype"] for a in annotations} == {"/Redact"}
@@ -196,6 +220,7 @@ def test_the_blacklist_keeps_a_name_unmarked() -> None:
     options = RedactFileOptions(entity_types=["person"], blacklist=["Zwyssig"])
 
     marked = asyncio.run(service().mark(make_pdf(), "baugesuch.pdf", options))
+    assert isinstance(marked, MarkedPdf)
 
     assert marked.marks == 0
     assert "/Annots" not in PdfReader(BytesIO(marked.content)).pages[0]
@@ -239,6 +264,124 @@ def test_only_a_pdf_can_come_back_marked() -> None:
     assert refused.value.error_response["errorId"] == INVALID_MIME_TYPE
 
 
+def test_annotations_come_back_instead_of_the_marked_pdf() -> None:
+    """The interface keeps the file and draws the marks over it, so the answer
+    carries the marks alone: id, what they cover and where."""
+    options = RedactFileOptions(entity_types=["person"], pdf_annotations=True)
+
+    result = asyncio.run(service().mark(make_pdf(), "baugesuch.pdf", options))
+
+    assert isinstance(result, PdfAnnotations)
+    assert [annotation.label for annotation in result.annotations] == ["person", "person"]
+    assert [annotation.text for annotation in result.annotations] == [NAME, NAME]
+    for annotation in result.annotations:
+        assert annotation.id
+        page, left, top, right, bottom = annotation.boxes[0]
+        assert page == 1
+        assert 0 <= left < right <= 595
+        assert 0 <= top < bottom <= 842
+
+
+def test_a_mention_over_two_lines_is_one_annotation_with_two_boxes() -> None:
+    """ "Hildegard" on one line and "Zwyssig" on the next are one mention of
+    the name only where the text runs on; the boxes of one annotation say so."""
+    annotations = PdfAnnotations(
+        annotations=[
+            MarkAnnotation(
+                id="d1",
+                label="person",
+                confidence=0.9,
+                text=NAME,
+                boxes=[
+                    (1, 100, 100, 180, 112),
+                    (1, 100, 118, 150, 130),
+                ],
+            )
+        ],
+        page_sizes={1: (595.0, 842.0)},
+    )
+
+    assert len(annotations.annotations) == 1
+    assert len(annotations.annotations[0].boxes) == 2
+
+
+def test_the_reviewed_marks_are_written_with_their_ids_and_overlay() -> None:
+    """A review's answer carries the mark's id (kept as /NM) and, where the
+    reader chose a placeholder, the text the area takes when applied."""
+    original = make_pdf()
+    payload = RedactPdfAnnotateInput(
+        annotations=[
+            MarkAnnotationInput(
+                id="d1", label="person", confidence=0.97, text=NAME, boxes=[(1, 60, 740, 200, 756)], overlay="Person-1"
+            ),
+        ]
+    )
+
+    result = asyncio.run(service().write_annotations(original, "baugesuch.pdf", payload.annotations))
+
+    annotation = annotations_of_first_page(result_content(result))[0]
+    assert annotation["/NM"] == "d1"
+    assert annotation["/OverlayText"] == "Person-1"
+    assert annotation["/Subtype"] == "/Redact"
+
+
+def test_boxes_in_their_named_shape_are_read_as_bare_arrays() -> None:
+    """The scan's answer names every field of a box; a review sends the same
+    shape back, and the write path reads both."""
+    payload = RedactPdfAnnotateInput(
+        annotations=[
+            MarkAnnotationInput(
+                id="d1",
+                label="person",
+                confidence=0.97,
+                text=NAME,
+                boxes=[{"page": 1, "left": 60.0, "top": 740.0, "right": 200.0, "bottom": 756.0}],
+            ),
+        ]
+    )
+    assert payload.annotations[0].mark_boxes() == [MarkBox(page=1, left=60.0, top=740.0, right=200.0, bottom=756.0)]
+
+    result = asyncio.run(service().write_annotations(make_pdf(), "baugesuch.pdf", payload.annotations))
+
+    annotation = annotations_of_first_page(result_content(result))[0]
+    assert annotation["/NM"] == "d1"
+    # The named shape lands exactly where the bare array does: same box, same
+    # area, whatever the field order the caller names it in.
+    array_payload = RedactPdfAnnotateInput(
+        annotations=[
+            MarkAnnotationInput(id="d1", label="person", confidence=0.97, text=NAME, boxes=[(1, 60, 740, 200, 756)])
+        ]
+    )
+    array_result = asyncio.run(service().write_annotations(make_pdf(), "baugesuch.pdf", array_payload.annotations))
+    assert annotation["/Rect"] == annotations_of_first_page(result_content(array_result))[0]["/Rect"]
+
+
+def test_an_overlay_is_not_written_where_nobody_chose_one() -> None:
+    original = make_pdf()
+    payload = RedactPdfAnnotateInput(
+        annotations=[
+            MarkAnnotationInput(id="d2", label="person", confidence=0.9, text=NAME, boxes=[(1, 60, 740, 200, 756)]),
+        ]
+    )
+
+    result = asyncio.run(service().write_annotations(original, "baugesuch.pdf", payload.annotations))
+
+    annotation = annotations_of_first_page(result_content(result))[0]
+    assert "/OverlayText" not in annotation
+    assert annotation["/NM"] == "d2"
+
+
+def test_boxes_past_the_pages_are_refused() -> None:
+    payload = RedactPdfAnnotateInput(
+        annotations=[
+            MarkAnnotationInput(id="d3", label="person", boxes=[(9, 0, 0, 10, 10)]),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="past the"):
+        asyncio.run(service().write_annotations(make_pdf(), "baugesuch.pdf", payload.annotations))
+
+
 def test_a_marked_pdf_is_collected_as_the_pdf_itself() -> None:
     async def finished_resource(store: TaskStore) -> str:
         store.start()
@@ -249,9 +392,11 @@ def test_a_marked_pdf_is_collected_as_the_pdf_itself() -> None:
         task = store.submit(work, lane="convert")
         for _ in range(50):
             await asyncio.sleep(0)
-        resource_id = store.poll(task.id).resource_id  # ty: ignore[possibly-missing-attribute]
+        state = store.poll(task.id)
+        assert state is not None and state.resource_id is not None
+        assert state.resource_id  # narrows for the checker; never false in a green run
         await store.stop()
-        return resource_id
+        return state.resource_id
 
     store = TaskStore(lanes={"convert": LaneConfig(workers=1, max_queued=1)})
     resource_id = asyncio.run(finished_resource(store))
@@ -264,3 +409,44 @@ def test_a_marked_pdf_is_collected_as_the_pdf_itself() -> None:
     assert response.headers["x-mark-count"] == "3"
     assert "baugesuch.markiert.pdf" in response.headers["content-disposition"]
     assert response.content == b"%PDF-1.7 ..."
+
+
+def test_annotations_are_collected_as_the_contract_reads_them() -> None:
+    """The marks as JSON: every box a named thing, not a bare array."""
+    annotation = MarkAnnotation(
+        id="d1", label="person", confidence=0.9, text=NAME, boxes=[(1, 595.0, 842.0, 60.0, 100.0)]
+    )
+
+    async def answer(_task: object) -> PdfAnnotations:
+        return PdfAnnotations(annotations=[annotation], page_sizes={1: (595.0, 842.0)})
+
+    async def finished_resource(store: TaskStore) -> str:
+        store.start()
+        task = store.submit(answer, lane="convert")
+        # The run has to be polled by somebody, or it is abandoned and dropped
+        # before it finishes (see task_store).
+        for _ in range(50):
+            store.poll(task.id)
+            await asyncio.sleep(0)
+        state = store.poll(task.id)
+        assert state is not None and state.resource_id is not None
+        assert state.resource_id
+        return state.resource_id
+
+    store = TaskStore(lanes={"convert": LaneConfig(workers=1, max_queued=1)})
+    resource_id = asyncio.run(finished_resource(store))
+    app = FastAPI()
+    app.include_router(task_router.create_router(task_store=store))
+
+    response = TestClient(app).get(f"/resource/{resource_id}")
+
+    body = response.json()
+    assert body["annotations"][0]["id"] == "d1"
+    assert body["annotations"][0]["boxes"][0] == {
+        "page": 1,
+        "left": 595.0,
+        "top": 842.0,
+        "right": 60.0,
+        "bottom": 100.0,
+    }
+    assert body["page_sizes"] == {"1": [595.0, 842.0]}
