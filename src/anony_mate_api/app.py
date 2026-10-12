@@ -142,7 +142,7 @@ def create_app() -> FastAPI:
 
     _register_health_routes(app, config)
     _configure_cors(app, config.client_url, logger)
-    add_logging_middleware(app, excluded_paths={"/health", "/docs", "/openapi.json"})
+    add_logging_middleware(app, excluded_paths={"/health", "/docs", "/openapi.json", "/task"})
     _register_routes(app, logger)
 
     # only in development mode, enable pydantic_ai logfire instrumentation
