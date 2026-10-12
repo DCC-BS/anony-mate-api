@@ -1,6 +1,5 @@
 import asyncio
 import gzip
-import json
 import re
 import time
 from collections import defaultdict
@@ -12,7 +11,6 @@ import httpx
 from dcc_backend_common.fastapi_error_handling import ApiErrorException
 from dcc_backend_common.logger import get_logger
 from fastapi import status
-from pydantic import ValidationError
 
 from anony_mate_api.models.error_codes import REDACT_ERROR, REDACT_TIMEOUT
 from anony_mate_api.models.gliner_models import GlinerInput, GlinerResponse, GlinerTaskState
@@ -27,7 +25,7 @@ CORRELATION_HEADER = "X-Correlation-Id"
 
 
 def _create_entities_dict(gliner_response: GlinerResponse) -> dict[str, list[Entity]]:
-    entity_dict: dict[str, list[Entity]] = defaultdict(list, [])
+    entity_dict: dict[str, list[Entity]] = defaultdict(list)
     for label, items in gliner_response.entities.items():
         for i, item in enumerate(items):
             entity_dict[label].append(
@@ -113,6 +111,11 @@ def _propagate_repeats(
     for label in sorted(labels):
         found = entities[label]
         confidence = min((entity.confidence for entity in found), default=1.0)
+        # The numbering resumes above the highest id already present: entities
+        # were numbered before the filters dropped some of them, so the list's
+        # length is not always the next free number, and a placeholder the
+        # same as a surviving entity's would name two mentions.
+        next_id = 1 + max((int(entity.id) for entity in grown[label]), default=0)
 
         for needle in sorted(_repeatable_mentions(label, found), key=lambda mention: (-len(mention), mention)):
             for found_start, found_end in _repeats(needle, text, everywhere):
@@ -123,13 +126,14 @@ def _propagate_repeats(
                 grown[label].append(
                     Entity(
                         label=label,
-                        id=str(len(grown[label]) + 1),
+                        id=str(next_id),
                         text=text[found_start:found_end],
                         start=found_start,
                         end=found_end,
                         confidence=confidence,
                     )
                 )
+                next_id += 1
 
     return grown
 
@@ -176,12 +180,13 @@ def _filter_blacklisted(entities: dict[str, list[Entity]], blacklist: list[str])
     }
 
 
-def _redact_text(text: str, entities: dict[str, list[Entity]], replacement_fn: Callable[[Entity], str]):
+def _redact_text(text: str, entities: dict[str, list[Entity]], replacement_fn: Callable[[Entity], str]) -> str:
     """Replace every detection in the text with its placeholder.
 
     Detections of different labels may overlap; the widest one at a position
     stands for all of them, so no part of a covered mention is written out.
     """
+
     sorted_entities = sorted(
         (entity for entities_list in entities.values() for entity in entities_list),
         key=lambda e: (e.start, -e.end),
@@ -225,28 +230,30 @@ class RedactService:
             "Authorization": f"Bearer {self.config.gliner_api_key}",
             CORRELATION_HEADER: correlation_id,
         }
-        # A multipart upload carries the document as file bytes; only its size
-        # is worth logging, the parts themselves are not JSON.
-        payload = (
-            b"".join(content for _, content, _ in files.values())
-            if files is not None
-            else json.dumps(body).encode()
-            if body is not None
-            else b""
-        )
+        if files is not None:
+            request = self.client.build_request(method, url, headers=headers, files=files, data=data or {})
+            # Each file part goes by a name and weighs something of the whole.
+            files_log: dict[str, Any] = {"files": {name: len(content) for name, content, _ in files.values()}}
+        else:
+            request = self.client.build_request(method, url, headers=headers, json=body)
+            files_log = {}
+
+        # The size is read off the built request, not assembled by hand: a
+        # file upload travels as multipart, and the framing around the file
+        # parts and the form fields beside them ride along with it. Reading
+        # the request also settles it into memory, so it can be sent as read.
+        body_bytes = await request.aread()
         logger.debug(
             "Calling Gliner",
             base_url=str(self.client.base_url),
             path=url,
             method=method,
-            request_bytes=len(payload),
+            request_bytes=len(body_bytes),
             correlation_id=correlation_id,
+            **files_log,
         )
         try:
-            if files is not None:
-                response = await self.client.request(method, url, headers=headers, files=files, data=data or {})
-            else:
-                response = await self.client.request(method, url, headers=headers, json=body)
+            response = await self.client.send(request)
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             content_type = e.response.headers.get("content-type", "")
@@ -258,9 +265,10 @@ class RedactService:
                 # That tells you which of the two rejected the call.
                 responded_by="gateway" if "html" in content_type else "gliner",
                 content_type=content_type,
-                request_bytes=len(payload),
+                request_bytes=len(body_bytes),
                 correlation_id=correlation_id,
                 body=e.response.text[:2000],
+                **files_log,
             )
             raise ApiErrorException({
                 "errorId": REDACT_ERROR,
@@ -272,8 +280,9 @@ class RedactService:
                 "Gliner API timed out",
                 url=str(e.request.url),
                 timeout=self.config.gliner_http_timeout_seconds,
-                request_bytes=len(payload),
+                request_bytes=len(body_bytes),
                 correlation_id=correlation_id,
+                **files_log,
             )
             raise ApiErrorException({
                 "errorId": REDACT_TIMEOUT,
@@ -282,21 +291,17 @@ class RedactService:
             }) from e
         except httpx.RequestError as e:
             logger.exception(
-                "Gliner api connection error", url=f"{self.client.base_url}{url.lstrip(chr(47))}", error=str(e)
+                "Gliner api connection error",
+                url=f"{self.client.base_url}{url.lstrip(chr(47))}",
+                error=str(e),
+                request_bytes=len(body_bytes),
+                correlation_id=correlation_id,
+                **files_log,
             )
             raise ApiErrorException({
                 "errorId": REDACT_ERROR,
                 "status": status.HTTP_500_INTERNAL_SERVER_ERROR,
                 "debugMessage": f"Gliner connection error: {e!s}",
-            }) from e
-        except ValidationError as e:
-            logger.exception(
-                "Validation error from gliner", url=f"{self.client.base_url}{url.lstrip(chr(47))}", error=str(e)
-            )
-            raise ApiErrorException({
-                "errorId": REDACT_ERROR,
-                "status": status.HTTP_500_INTERNAL_SERVER_ERROR,
-                "debugMessage": f"Validation error: {e!s}",
             }) from e
         else:
             return response
@@ -320,6 +325,14 @@ class RedactService:
 
         body = payload.model_dump_json().encode()
         files = {"file": ("request.json.gz", gzip.compress(body), "application/gzip")}
+        # The JSON path logs its plain size; the upload logs what it leaves
+        # with and what rides in the file part, so the two paths can be
+        # compared and Gliner's log can be matched after it unzips.
+        logger.debug(
+            "Gzipping the extraction request for the file part",
+            json_bytes=len(body),
+            gzipped_bytes=len(files["file"][1]),
+        )
         accepted = await self._request(
             "/extract_entities/async/upload",
             files=files,
