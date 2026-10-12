@@ -86,6 +86,19 @@ def test_repeats_never_overwrite_what_the_model_already_labelled():
     assert len(grown["organisation"]) == 1
 
 
+def test_appended_repeats_never_reuse_a_number_already_taken():
+    """Detections were numbered before the filters dropped some of them."""
+    text = "Acme AG und Acme AG schrieben."
+    entities = {
+        # as if the sibling detection had been filtered away after numbering
+        "organisation": [Entity(label="organisation", id="2", text="Acme AG", start=0, end=7, confidence=0.9)],
+    }
+    grown = _propagate_repeats(text, entities, everywhere=True)
+
+    # the second mention cannot carry the first's placeholder
+    assert [e.id for e in grown["organisation"]] == ["2", "3"]
+
+
 def test_a_label_that_does_not_repeat_is_left_alone():
     text = "Am 12. August 2024 und am 12. August 2024."
     entities = {"datum": [Entity(label="datum", id="1", text="12. August 2024", start=3, end=18, confidence=0.9)]}
