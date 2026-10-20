@@ -277,8 +277,15 @@ def create_router() -> APIRouter:
     router: APIRouter = APIRouter(prefix="/entity_types")
 
     @router.get("/{type_name}")
-    async def entity_types(type_name: EntityType) -> dict[str, EntityTypeInfo]:
-        return {label: ENTITY_TYPES[label] for label in PRESETS[type_name]}
+    async def entity_types(type_name: EntityType, verbose: bool = False) -> dict[str, str] | dict[str, EntityTypeInfo]:
+        """The available entity types of a preset — `default`, `legal` or
+        `full` — as `label: description`, ready to pass as `entity_types`
+        when redacting. With `verbose`, each entry also carries the type's
+        display `name`, for interfaces."""
+        types = {label: ENTITY_TYPES[label] for label in PRESETS[type_name]}
+        if verbose:
+            return types
+        return {label: info.description for label, info in types.items()}
 
     logger.info("entity types router configured")
 
