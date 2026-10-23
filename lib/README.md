@@ -1,6 +1,6 @@
 # anony-mate-lib
 
-Async Python client for the [AnonyMate API](https://DCC-BS.github.io/anony-mate-api/):
+Async Python client for the AnonyMate API:
 redact personal data from texts and documents without running anything yourself.
 
 ```bash
