@@ -21,7 +21,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# `lib/` is the anony-mate-lib client project — never ignore it (only its build output below).
 lib64/
 parts/
 sdist/

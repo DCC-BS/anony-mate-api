@@ -13,7 +13,7 @@ from fastapi import APIRouter, Request, UploadFile
 from anony_mate_api.container import Container
 from anony_mate_api.models.conversion import ConversionResult
 from anony_mate_api.models.tasks import TaskAccepted
-from anony_mate_api.routers._submission import client_key, queue_full_error
+from anony_mate_api.routers._submission import client_key, queue_full_error, submit_response
 from anony_mate_api.services.document_conversion_service import DocumentConversionService
 from anony_mate_api.services.task_store import QueueFullError, TaskData, TaskStore
 
@@ -28,8 +28,13 @@ def create_router(
     logger.info("Creating conversion router")
     router: APIRouter = APIRouter(prefix="/convert", tags=["convert"])
 
-    @router.post("/doc", summary="Convert an uploaded document to markdown text")
+    @router.post("/doc", summary="Convert document to markdown")
     async def convert(request: Request, file: UploadFile) -> ConversionResult:
+        """Convert an uploaded document (PDF, DOCX, images, …) to markdown text.
+
+        The conversion runs while the request is open; if the client
+        disconnects it is cancelled. For large documents prefer
+        `POST /convert/doc/async`."""
         logger.info("Converting document", filename=file.filename, content_type=file.content_type, size=file.size)
 
         task = asyncio.create_task(document_conversion_service.convert(file))
@@ -45,11 +50,19 @@ def create_router(
 
     @router.post(
         "/doc/async",
-        summary="Submit a document conversion and poll for it",
+        summary="Convert document (async)",
         status_code=202,
+        responses=submit_response(
+            "the converted document as markdown text ([`ConversionResult`](#/schemas/ConversionResult))"
+        ),
     )
     async def convert_async(file: UploadFile, request: Request) -> TaskAccepted:
-        """Accept the upload and return at once, so a slow OCR cannot time out."""
+        """Convert an uploaded document without waiting for the result.
+
+        Returns a `task_id` (202) for a background job; how to poll and
+        collect the result is described under "Tasks and resources" in the
+        overview. The conversion has no fraction, only started/pending and
+        the queue position."""
         logger.info("Queueing document conversion", filename=file.filename, size=file.size)
 
         # The upload is consumed here: the request body is gone by the time the

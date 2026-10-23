@@ -58,7 +58,7 @@ run = [
     "uv lock --locked",
     "uv run ruff format",
     "uv run ruff check --fix",
-    "uv run ty check ./src/anony_mate_api",
+    "uv run ty check ./src/anony_mate_api ./lib/src",
     "varlock scan",
 ]
 
@@ -68,17 +68,20 @@ run = [
     "uv lock --locked",
     "uv run ruff format --check",
     "uv run ruff check",
-    "uv run ty check ./src/anony_mate_api",
+    "uv run ty check ./src/anony_mate_api ./lib/src",
     "varlock scan",
 ]
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 
 [tasks."test:unit"]
-description = "Run the test suite (including doctests)"
+description = "Run the test suite (including doctests), API server and client library"
 alias = "t"
 env = { APP_MODE = "ci" }
-run = "uv run python -m pytest --doctest-modules"
+run = [
+    "uv run python -m pytest --doctest-modules",
+    "uv run --project lib python -m pytest --doctest-modules lib/tests",
+]
 
 [tasks.ci]
 description = "Run all CI checks (lock, format, lint, types, tests)"
@@ -105,9 +108,12 @@ run = "docker compose logs -f"
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 [tasks.build]
-description = "Build the wheel file"
+description = "Build the wheel files (API server and client library)"
 depends = ["cleanup:build"]
-run = "uvx --from build pyproject-build --installer uv"
+run = [
+    "uvx --from build pyproject-build --installer uv",
+    "uv build --out-dir dist lib",
+]
 
 [tasks."cleanup:build"]
 description = "Remove build artifacts"

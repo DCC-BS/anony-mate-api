@@ -131,11 +131,36 @@ The API documentation (OpenAPI/Swagger) is served at `http://localhost:8000/docs
 
 | Router | Purpose |
 |--------|---------|
-| `/redact` | Detect entities in submitted text and return it redacted (single, `batch`, `async`) |
+| `/anonymize` | Detect entities in submitted text and return it redacted (single, `batch`, `async`, file and PDF uploads) |
 | `/convert` | Upload a document (`/doc`) and convert it to text (async task) |
 | `/task/{task_id}` | Poll task status and fetch results |
 | `/entity_types` | Entity type presets and schema validation |
 | `/blacklist` | Never-redact terms |
+
+### Python Client
+
+The client library ships as its own lightweight package, `anony-mate-lib`
+(the `lib/` workspace member; it needs only `httpx` and `pydantic`):
+
+```bash
+uv add "anony-mate-lib @ git+https://github.com/DCC-BS/anony-mate-api#subdirectory=lib"
+```
+
+On entering it loads the `default` presets of entity types and blacklist, so
+redaction works without settings of its own; the async submissions poll the
+task and collect the result as part of the call:
+
+```python
+from anony_mate_lib import AnonyMateClient, RedactInput
+
+async with AnonyMateClient("http://localhost:8000") as client:
+    result = await client.anonymize_text(RedactInput(text="Anna wohnt in Berlin."))
+    print(result.text)  # [person:1] wohnt in [ort:1].
+```
+
+The request and response models live in `anony_mate_lib.models`; the building
+blocks the client itself is made of — preset and task polling helpers for use
+with an own `httpx` client — one level below. See `lib/README.md` for details.
 
 ---
 

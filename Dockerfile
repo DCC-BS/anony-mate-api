@@ -47,6 +47,11 @@ FROM debian:13-slim
 # Set the working directory
 WORKDIR /app
 
+# Install curl
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Security: Create and switch to a non-root user
 RUN useradd --create-home --uid 1000 app
 

@@ -1,17 +1,11 @@
-from enum import Enum
-
 from dcc_backend_common.logger import get_logger
 from dependency_injector.wiring import inject
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from anony_mate_api.models.entity_type import EntityType
+
 logger = get_logger("entity_types_router")
-
-
-class EntityType(Enum):
-    default = "default"
-    legal = "legal"
-    full = "full"
 
 
 class EntityTypeInfo(BaseModel):
@@ -274,7 +268,7 @@ PRESETS: dict[EntityType, list[str]] = {
 @inject
 def create_router() -> APIRouter:
     logger.info("Creating entity types router")
-    router: APIRouter = APIRouter(prefix="/entity_types")
+    router: APIRouter = APIRouter(prefix="/entity_types", tags=["entities"])
 
     @router.get("/{type_name}")
     async def entity_types(type_name: EntityType, verbose: bool = False) -> dict[str, str] | dict[str, EntityTypeInfo]:

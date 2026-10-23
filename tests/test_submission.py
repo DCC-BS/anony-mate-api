@@ -13,7 +13,7 @@ def _request(headers: dict[str, str] | None = None, host: str = "10.0.0.1") -> R
         scope={
             "type": "http",
             "method": "POST",
-            "path": "/redact/async",
+            "path": "/anonymize/async",
             "headers": Headers(headers or {}).raw,
             "client": ("10.0.0.1", 1234),
         }

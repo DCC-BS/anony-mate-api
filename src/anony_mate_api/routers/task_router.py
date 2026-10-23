@@ -15,6 +15,7 @@ from anony_mate_api.models.error_codes import TASK_NOT_FOUND
 from anony_mate_api.models.marked_pdf import MarkedPdf, PdfAnnotations
 from anony_mate_api.models.redact_models import PdfAnnotationsOutput
 from anony_mate_api.models.tasks import TaskState
+from anony_mate_api.routers._submission import resource_response
 from anony_mate_api.services.task_store import TaskStore
 
 logger = get_logger("task_router")
@@ -25,8 +26,31 @@ def create_router(task_store: TaskStore = Provide[Container.task_store]) -> APIR
     logger.info("Creating task router")
     router: APIRouter = APIRouter(tags=["tasks"])
 
-    @router.get("/task/{task_id}", summary="Status of a submitted task")
+    @router.get(
+        "/task/{task_id}",
+        summary="Task status",
+        operation_id="get_task_status",
+        responses={
+            "200": {
+                "description": (
+                    "The task's current state; when `finished`, the `resource_id` names where to collect the result."
+                ),
+                "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TaskState"}}},
+                "links": {
+                    "CollectResult": {
+                        "operationId": "get_task_result",
+                        "parameters": {"resource_id": "$response.body#/resource_id"},
+                        "description": "Collect the result with the returned `resource_id`, once the task is `finished`.",
+                    }
+                },
+            }
+        },
+    )
     async def task_state(task_id: str) -> TaskState:
+        """Status of a submitted task: `pending` or `running` with progress or
+        queue position while it works, `finished` with a `resource_id` once
+        the result is ready, `failed` with an error otherwise. The full
+        lifecycle is described under "Tasks and resources" in the overview."""
         task = task_store.poll(task_id)
         if task is None:
             raise ApiErrorException({
@@ -46,15 +70,23 @@ def create_router(task_store: TaskStore = Provide[Container.task_store]) -> APIR
 
     @router.get(
         "/resource/{resource_id}",
-        summary="Collect a finished result (once)",
-        responses={200: {"content": {"application/json": {}, "application/pdf": {}}}},
+        summary="Fetch task result",
+        operation_id="get_task_result",
+        responses=resource_response(
+            "RedactOutput",
+            "DocumentRedactOutput",
+            "ConversionResult",
+            "PdfAnnotationsOutput",
+            pdf=True,
+        ),
     )
     async def resource(resource_id: str) -> object:
-        """Hand the result over and drop it, so finished work is not kept.
+        """Collect the result of a finished task, once.
 
-        A marked PDF is served as the PDF itself, with the number of marks on
-        it in ``X-Mark-Count``; everything else as JSON.
-        """
+        The result is delivered exactly this one time and then deleted. Redacted
+        text and document conversions come back as JSON; a marked PDF comes
+        back as the PDF file itself, with the number of marks on it in the
+        `X-Mark-Count` header."""
         found, result = task_store.take_resource(resource_id)
         if not found:
             raise ApiErrorException({

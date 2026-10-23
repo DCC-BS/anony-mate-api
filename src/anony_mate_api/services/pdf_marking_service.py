@@ -25,8 +25,8 @@ from anony_mate_api.models.error_codes import UNREADABLE_PDF
 from anony_mate_api.models.marked_pdf import MarkAnnotation, MarkedPdf, PdfAnnotations
 from anony_mate_api.models.redact_models import (
     MarkAnnotationInput,
-    RedactFileOptions,
     RedactInput,
+    RedactPdfOptions,
 )
 from anony_mate_api.services.document_conversion_service import DocumentConversionService
 from anony_mate_api.services.pdf_marks.box import Box
@@ -85,18 +85,20 @@ class PdfMarkingService:
         self,
         pdf: bytes,
         filename: str,
-        settings: RedactFileOptions,
+        settings: RedactPdfOptions,
         on_status: Callable[[str, int | None], None] | None = None,
         on_progress: Callable[[float | None], None] | None = None,
     ) -> MarkedPdf | PdfAnnotations:
-        """The original PDF with a redaction mark on everything detected in it.
+        """The marks found in the PDF, or the PDF marked for redaction.
 
         Args:
             pdf: The uploaded PDF, as it came.
             filename: Its name, kept for the result.
-            settings: Entity types, threshold and blacklist, as for the text path.
-                With ``pdf_annotations`` set, the answer is the marks alone, for
-                an interface that keeps the file and draws the marks over it.
+            settings: Entity types, threshold and blacklist. With
+                ``marked_pdf`` set, the answer is the PDF itself with a
+                redaction mark on everything detected; otherwise the marks
+                alone, for an interface that keeps the file and draws the
+                marks over it.
             on_status: Docling's status and queue position while it reads the layout.
             on_progress: The detection's progress, once it runs.
 
@@ -118,7 +120,7 @@ class PdfMarkingService:
         marks = merge_same(_picture_marks(layout.pictures) + _span_marks(mentions, layout))
         logger.info("Marked PDF", filename=filename, pages=len(layout.page_sizes), marks=len(marks))
 
-        if settings.pdf_annotations:
+        if not settings.marked_pdf:
             return PdfAnnotations(annotations=_annotations_of(marks), page_sizes=layout.page_sizes)
 
         marked = await asyncio.to_thread(annotate, pdf, marks, self.author)
@@ -165,7 +167,7 @@ class PdfMarkingService:
     async def _detect(
         self,
         layout: Layout,
-        settings: RedactFileOptions,
+        settings: RedactPdfOptions,
         on_progress: Callable[[float | None], None] | None,
     ) -> list[Mention]:
         """What anonymate finds in the layout's text, with the boxes it covers.

@@ -29,7 +29,7 @@ from pypdf import PdfReader
 
 from anony_mate_api.models.error_codes import INVALID_MIME_TYPE
 from anony_mate_api.models.marked_pdf import MarkAnnotation, MarkedPdf, PdfAnnotations
-from anony_mate_api.models.redact_models import MarkAnnotationInput, MarkBox, RedactFileOptions, RedactPdfAnnotateInput
+from anony_mate_api.models.redact_models import MarkAnnotationInput, MarkBox, RedactPdfAnnotateInput, RedactPdfOptions
 from anony_mate_api.routers import task_router
 from anony_mate_api.routers.redact_router import _marking_job
 from anony_mate_api.services.document_conversion_service import ReadLayout
@@ -202,7 +202,9 @@ def test_every_mention_of_a_detected_name_is_marked_on_the_original() -> None:
     progress: list[float | None] = []
 
     marked = asyncio.run(
-        service().mark(original, "baugesuch.pdf", RedactFileOptions(entity_types=["person"]), None, progress.append)
+        service().mark(
+            original, "baugesuch.pdf", RedactPdfOptions(entity_types=["person"], marked_pdf=True), None, progress.append
+        )
     )
     assert isinstance(marked, MarkedPdf)
 
@@ -217,7 +219,7 @@ def test_every_mention_of_a_detected_name_is_marked_on_the_original() -> None:
 
 
 def test_the_blacklist_keeps_a_name_unmarked() -> None:
-    options = RedactFileOptions(entity_types=["person"], blacklist=["Zwyssig"])
+    options = RedactPdfOptions(entity_types=["person"], blacklist=["Zwyssig"], marked_pdf=True)
 
     marked = asyncio.run(service().mark(make_pdf(), "baugesuch.pdf", options))
     assert isinstance(marked, MarkedPdf)
@@ -274,7 +276,7 @@ def test_only_a_pdf_can_come_back_marked() -> None:
     upload = (b"PK...", "brief.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
     with pytest.raises(ApiErrorException) as refused:
-        _marking_job(service(), upload, RedactFileOptions())
+        _marking_job(service(), upload, RedactPdfOptions())
 
     assert refused.value.error_response["errorId"] == INVALID_MIME_TYPE
 
@@ -282,7 +284,7 @@ def test_only_a_pdf_can_come_back_marked() -> None:
 def test_annotations_come_back_instead_of_the_marked_pdf() -> None:
     """The interface keeps the file and draws the marks over it, so the answer
     carries the marks alone: id, what they cover and where."""
-    options = RedactFileOptions(entity_types=["person"], pdf_annotations=True)
+    options = RedactPdfOptions(entity_types=["person"])
 
     result = asyncio.run(service().mark(make_pdf(), "baugesuch.pdf", options))
 

@@ -1,8 +1,11 @@
-"""Response models for the poll-based task API."""
+"""What the task endpoints answer: acceptance and state of a background job."""
+
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from anony_mate_api.services.task_store import TaskStatus
+TaskStatus = Literal["pending", "running", "finished", "failed"]
+"""Where a submitted job can stand while it works its way to a result."""
 
 
 class TaskAccepted(BaseModel):

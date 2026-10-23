@@ -23,6 +23,8 @@ dependencies = [
     # The document and page models docling-serve answers with.
     "docling-core>=2.96.1",
     "pypdf>=6.19.0",
+    # The HTTP client the redaction and conversion services call docling and gliner with.
+    "httpx>=0.28.0",
 ]
 
 [project.urls]

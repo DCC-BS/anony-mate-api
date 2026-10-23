@@ -1,5 +1,9 @@
+import re
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from html import escape as escape_html
+from pathlib import Path
+from typing import get_type_hints
 
 from dcc_backend_common.fastapi_error_handling import inject_api_error_handler
 from dcc_backend_common.fastapi_health_probes import health_probe_router
@@ -8,8 +12,13 @@ from dcc_backend_common.fastapi_logging_middleware import add_logging_middleware
 from dcc_backend_common.logger import get_logger, init_logger
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from pydantic_core import PydanticUndefined
 from structlog.stdlib import BoundLogger
 
+from anony_mate_api import models as anony_models
 from anony_mate_api.container import Container
 from anony_mate_api.routers import (
     blacklist_router,
@@ -50,14 +59,148 @@ def _build_fastapi_app() -> FastAPI:
     """
     app = FastAPI(
         title="anony-mate-api",
-        description="Tool for anonymize textTool for anonymize text",
+        description=Path(__file__).parent.joinpath("api_description.md").read_text(encoding="utf-8"),
         version="0.1.0",
         lifespan=_lifespan,
-        docs_url="/docs",
-        redoc_url="/redoc",
+        openapi_tags=[
+            {
+                "name": "anonymize",
+                "description": "Anonymize texts, documents and PDFs, and poll the submitted tasks' results",
+            },
+            {"name": "entities", "description": "Entity types and blacklists available for redaction"},
+            {"name": "convert", "description": "Convert uploaded documents to markdown"},
+            {"name": "tasks", "description": "Status and results of submitted tasks"},
+            {"name": "probes", "description": "Liveness, readiness and startup probes for orchestration"},
+        ],
+        docs_url=None,
+        redoc_url=None,
     )
+    _register_form_option_schemas(app)
+    app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+
+    @app.get("/docs", include_in_schema=False)
+    async def docs() -> HTMLResponse:
+        return HTMLResponse(_docs_html(title=f"{app.title} API Reference"))
 
     return app
+
+
+def _docs_html(title: str) -> str:
+    """
+    The Stoplight Elements page, served from our own static files.
+    """
+    return f"""<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>{escape_html(title)}</title>
+        <link rel="stylesheet" href="/static/elements/styles.min.css"/>
+        <script src="/static/elements/web-components.min.js" defer></script>
+        <style>html, body {{ margin: 0; padding: 0; }}</style>
+    </head>
+    <body>
+        <elements-api
+            apiDescriptionUrl="/openapi.json"
+            router="hash"
+            layout="sidebar"
+            tryItCredentialsPolicy="same-origin"
+        ></elements-api>
+    </body>
+</html>"""
+
+
+def _pydantic_snippet(model: type[BaseModel]) -> str:
+    """
+    A readable Pydantic model definition for one schema, for the docs.
+    """
+    hints = get_type_hints(model)
+    lines = [f"class {model.__name__}(BaseModel):"]
+    # The model's own docstring, not one inherited from a base.
+    doc = model.__dict__.get("__doc__")
+    if doc:
+        first = doc.splitlines()[0]
+        # Skip MkDocs decorations, which are not part of the model itself.
+        if not first.startswith(("!!!", "[!", "{")):
+            lines.append(f'    """{first}"""')
+    for name, field in model.model_fields.items():
+        annotation = hints[name]
+        annotation = annotation.__name__ if isinstance(annotation, type) else str(annotation)
+        annotation = re.sub(r"anony_mate_api\.models\.\w+\.", "", annotation)
+        annotation = annotation.replace("typing.", "")
+        line = f"    {name}: {annotation}"
+        if field.default is not PydanticUndefined:
+            line += f" = {field.default!r}"
+        elif field.default_factory is not None:
+            factory = field.default_factory
+            line += (
+                f" = {factory()!r}"
+                if callable(factory) and factory in (list, dict, set)
+                else "  # has a default factory"
+            )
+        if field.description:
+            line += f"  # {field.description.splitlines()[0]}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _register_form_option_schemas(app: FastAPI) -> None:
+    """
+    Add the models referenced by the upload endpoints' JSON form parts.
+
+    FastAPI only emits component schemas for models it references itself, so
+    the ``$ref`` in ``json_form_openapi`` would dangle without this. Every
+    component backed by one of our Pydantic models also carries its model
+    definition as code, so API users see how to build the object.
+    """
+    our_models = {
+        obj.__name__: obj
+        for module in (
+            anony_models.redact_models,
+            anony_models.conversion,
+            anony_models.tasks,
+            anony_models.gliner_models,
+        )
+        for obj in vars(module).values()
+        if isinstance(obj, type) and issubclass(obj, BaseModel) and obj.__module__.startswith("anony_mate_api")
+    }
+
+    def openapi() -> dict:
+        if app.openapi_schema:
+            # FastAPI's ``openapi`` caches its schema and hands the same dict
+            # out on every call; injecting again would stack another example
+            # onto each description on every request.
+            return app.openapi_schema
+        schema = _openapi()
+        components = schema.setdefault("components", {}).setdefault("schemas", {})
+        for model in (
+            anony_models.redact_models.RedactFileOptions,
+            anony_models.redact_models.RedactPdfOptions,
+            anony_models.redact_models.RedactPdfAnnotateInput,
+            # Result shapes the task endpoints document but FastAPI never
+            # references itself.
+            anony_models.redact_models.DocumentRedactOutput,
+            anony_models.redact_models.PdfAnnotationsOutput,
+        ):
+            model_schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
+            for name, sub_schema in model_schema.pop("$defs", {}).items():
+                components.setdefault(name, sub_schema)
+            components.setdefault(model.__name__, model_schema)
+        for name, component in components.items():
+            model = our_models.get(name)
+            if model is None:
+                continue
+            snippet = _pydantic_snippet(model)
+            description = component.get("description", "")
+            component["description"] = (
+                f"{description}\n\n**Example Pydantic model**\n\n```python\n{snippet}\n```"
+                if description
+                else f"**Example Pydantic model**\n\n```python\n{snippet}\n```"
+            )
+        return schema
+
+    _openapi = app.openapi
+    app.openapi = openapi
 
 
 def _register_health_routes(app: FastAPI, config: AppConfig) -> None:
@@ -71,7 +214,9 @@ def _register_health_routes(app: FastAPI, config: AppConfig) -> None:
             api_key=config.llm_api_key,
         ),
     ]
-    app.include_router(health_probe_router(service_dependencies=service_dependencies))
+    # The probes come from the common library without a tag; include-time tags
+    # group them under their own heading in the docs.
+    app.include_router(health_probe_router(service_dependencies=service_dependencies), tags=["probes"])
 
 
 def _configure_container(app: FastAPI, logger: BoundLogger) -> Container:
