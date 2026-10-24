@@ -193,7 +193,9 @@ def test_convert_raises_when_task_fails() -> None:
             with pytest.raises(ApiErrorException) as excinfo:
                 _ = await service.convert(BytesIO(b"pdf-bytes"), filename="doc.pdf")
             assert excinfo.value.error_response["errorId"] == DOCUMENT_CONVERSION_ERROR
-            assert "ocr died" in excinfo.value.error_response["debugMessage"]
+            debug_message = excinfo.value.error_response["debugMessage"]
+            assert debug_message is not None
+            assert "ocr died" in debug_message
         finally:
             await service.close()
 

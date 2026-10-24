@@ -1,5 +1,6 @@
 import asyncio
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -189,7 +190,7 @@ def _service(handler) -> RedactService:
     return RedactService(_config(), transport=httpx.MockTransport(handler))
 
 
-def _json_response(body: dict, status: int = 200) -> httpx.Response:
+def _json_response(body: dict[str, Any] | list[Any], status: int = 200) -> httpx.Response:
     return httpx.Response(status, json=body)
 
 

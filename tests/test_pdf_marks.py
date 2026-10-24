@@ -16,7 +16,7 @@ from docling_core.types.doc.page import (
     TextCell,
 )
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import RectangleObject
+from pypdf.generic import ArrayObject, DictionaryObject, RectangleObject
 
 from anony_mate_api.services.pdf_marks.box import Box
 from anony_mate_api.services.pdf_marks.marks import Mark, annotate
@@ -207,12 +207,24 @@ def shown_box(pdf: bytes) -> Box:
     return Box(1, min(ua, ub), min(va, vb), max(ua, ub), max(va, vb))
 
 
+def annotations(pdf: bytes) -> list[DictionaryObject]:
+    annots = PdfReader(BytesIO(pdf)).pages[0]["/Annots"]
+    assert isinstance(annots, ArrayObject)
+    resolved: list[DictionaryObject] = []
+    for reference in annots:
+        annotation = reference.get_object()
+        assert isinstance(annotation, DictionaryObject)
+        resolved.append(annotation)
+    return resolved
+
+
 def text_under_marks(pdf: bytes) -> str:
     page = pdfium.PdfDocument(pdf)[0].get_textpage()
-    rects = [
-        [float(value) for value in annotation.get_object()["/Rect"]]
-        for annotation in PdfReader(BytesIO(pdf)).pages[0]["/Annots"]
-    ]
+    rects: list[list[float]] = []
+    for annotation in annotations(pdf):
+        rect = annotation["/Rect"]
+        assert isinstance(rect, ArrayObject)
+        rects.append([float(value) for value in rect])
     return "".join(page.get_text_bounded(*rect) for rect in rects)
 
 
@@ -235,7 +247,7 @@ def test_a_mark_carries_the_standard_fields_and_the_text_it_covers() -> None:
 
     marked = annotate(original, [Mark(shown_box(original), "person", 0.93, NAME)], author="Anonymate")
 
-    annotation = PdfReader(BytesIO(marked)).pages[0]["/Annots"][0].get_object()
+    annotation = annotations(marked)[0]
     assert annotation["/Subtype"] == "/Redact"
     assert annotation["/T"] == "Anonymate"
     assert annotation["/Contents"] == f"person, Konfidenz 0.93: «{NAME}»"
@@ -248,7 +260,7 @@ def test_a_mark_on_a_picture_says_only_what_it_is() -> None:
 
     marked = annotate(original, [Mark(shown_box(original), "signature", 0.41, "")], author="Anonymate")
 
-    annotation = PdfReader(BytesIO(marked)).pages[0]["/Annots"][0].get_object()
+    annotation = annotations(marked)[0]
     assert annotation["/Contents"] == "signature, Konfidenz 0.41"
 
 

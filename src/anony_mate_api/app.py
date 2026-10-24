@@ -3,7 +3,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from html import escape as escape_html
 from pathlib import Path
-from typing import get_type_hints
+from typing import Any, cast, get_type_hints
 
 from dcc_backend_common.fastapi_error_handling import inject_api_error_handler
 from dcc_backend_common.fastapi_health_probes import health_probe_router
@@ -18,8 +18,8 @@ from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 from structlog.stdlib import BoundLogger
 
-from anony_mate_api import models as anony_models
 from anony_mate_api.container import Container
+from anony_mate_api.models import conversion, gliner_models, redact_models, tasks
 from anony_mate_api.routers import (
     blacklist_router,
     conversion_router,
@@ -156,16 +156,16 @@ def _register_form_option_schemas(app: FastAPI) -> None:
     our_models = {
         obj.__name__: obj
         for module in (
-            anony_models.redact_models,
-            anony_models.conversion,
-            anony_models.tasks,
-            anony_models.gliner_models,
+            redact_models,
+            conversion,
+            tasks,
+            gliner_models,
         )
         for obj in vars(module).values()
         if isinstance(obj, type) and issubclass(obj, BaseModel) and obj.__module__.startswith("anony_mate_api")
     }
 
-    def openapi() -> dict:
+    def openapi() -> dict[str, Any]:
         if app.openapi_schema:
             # FastAPI's ``openapi`` caches its schema and hands the same dict
             # out on every call; injecting again would stack another example
@@ -174,13 +174,13 @@ def _register_form_option_schemas(app: FastAPI) -> None:
         schema = _openapi()
         components = schema.setdefault("components", {}).setdefault("schemas", {})
         for model in (
-            anony_models.redact_models.RedactFileOptions,
-            anony_models.redact_models.RedactPdfOptions,
-            anony_models.redact_models.RedactPdfAnnotateInput,
+            redact_models.RedactFileOptions,
+            redact_models.RedactPdfOptions,
+            redact_models.RedactPdfAnnotateInput,
             # Result shapes the task endpoints document but FastAPI never
             # references itself.
-            anony_models.redact_models.DocumentRedactOutput,
-            anony_models.redact_models.PdfAnnotationsOutput,
+            redact_models.DocumentRedactOutput,
+            redact_models.PdfAnnotationsOutput,
         ):
             model_schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
             for name, sub_schema in model_schema.pop("$defs", {}).items():
@@ -200,7 +200,9 @@ def _register_form_option_schemas(app: FastAPI) -> None:
         return schema
 
     _openapi = app.openapi
-    app.openapi = openapi
+    # FastAPI's documented way to customise the schema is replacing
+    # ``app.openapi`` on the instance; ty only knows it as a method.
+    cast(Any, app).openapi = openapi
 
 
 def _register_health_routes(app: FastAPI, config: AppConfig) -> None:

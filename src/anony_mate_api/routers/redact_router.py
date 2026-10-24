@@ -4,7 +4,7 @@ from typing import Annotated
 from dcc_backend_common.fastapi_error_handling import ApiErrorException
 from dcc_backend_common.logger import get_logger
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, params, status
 from pydantic import BaseModel, ValidationError
 
 from anony_mate_api.container import Container
@@ -29,7 +29,7 @@ from anony_mate_api.services.task_store import QueueFullError, TaskData, TaskSto
 logger = get_logger("redact_router")
 
 
-def json_form(model: type[BaseModel], description: str) -> Depends:
+def json_form(model: type[BaseModel], description: str) -> params.Depends:
     """Parse a JSON-encoded form field into ``model``.
 
     Multipart forms only carry flat name/value pairs, so structured input
