@@ -59,7 +59,9 @@ dcc-backend-common = { git = "https://github.com/DCC-BS/backend-common" }
 
 [tool.uv]
 exclude-newer = "P7D"
-exclude-newer-package = { dcc-backend-common = "P0D" }
+# certifi/uv: exempt from the exclude-newer cooldown so CA-store security fixes (GHSA-6q48-6c7w-9gw2,
+# GHSA-hq85-5cpj-mr62) land right away.
+exclude-newer-package = { dcc-backend-common = "P0D", certifi = "P0D", uv = "P0D" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
