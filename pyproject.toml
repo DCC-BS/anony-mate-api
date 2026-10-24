@@ -68,6 +68,10 @@ addopts = [
 ]
 pythonpath = ["src"]
 
+[tool.ty.environment]
+# lib/ is the client library (its own project); its sources live in lib/src.
+root = ["./src", "./lib/src"]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 120

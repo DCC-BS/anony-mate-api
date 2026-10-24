@@ -41,4 +41,6 @@ def test_queue_full_error_is_a_429() -> None:
 
     assert api_error.error_response["errorId"] == TASK_QUEUE_FULL
     assert api_error.error_response["status"] == 429
-    assert "convert" in api_error.error_response["debugMessage"]
+    debug_message = api_error.error_response["debugMessage"]
+    assert debug_message is not None
+    assert "convert" in debug_message
