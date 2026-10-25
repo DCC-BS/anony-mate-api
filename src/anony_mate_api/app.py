@@ -53,6 +53,10 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info("Resources closed successfully")
 
 
+# repr of what `list` / `dict` / `set` as a default_factory produce, for the docs snippets
+_EMPTY_CONTAINER_REPR: dict[object, str] = {list: "[]", dict: "{}", set: "set()"}
+
+
 def _build_fastapi_app() -> FastAPI:
     """
     Instantiate the FastAPI application with metadata and lifespan.
@@ -132,12 +136,8 @@ def _pydantic_snippet(model: type[BaseModel]) -> str:
         if field.default is not PydanticUndefined:
             line += f" = {field.default!r}"
         elif field.default_factory is not None:
-            factory = field.default_factory
-            line += (
-                f" = {factory()!r}"
-                if callable(factory) and factory in (list, dict, set)
-                else "  # has a default factory"
-            )
+            empty = _EMPTY_CONTAINER_REPR.get(field.default_factory)
+            line += f" = {empty}" if empty is not None else "  # has a default factory"
         if field.description:
             line += f"  # {field.description.splitlines()[0]}"
         lines.append(line)
