@@ -24,30 +24,37 @@ class RedactionSettings(BaseModel):
     blacklist: list[str] = Field(description="Blacklist of words to avoid redaction", default=[])
 
 
-class RedactInput(RedactionSettings):
-    """One text to redact, sent to `POST /anonymize/`."""
-
-    text: str = Field(description="Text to redact")
-    repeat_everywhere: bool = Field(
+# Shared by RedactInput and RedactBatchInput.
+RepeatEverywhere = Annotated[
+    bool,
+    Field(
         description=(
             "Carry every detection to every place its text stands, whatever its label, and find it there however "
             "the text breaks it (line breaks, hyphenation, letter spacing, accents, ligatures). For a copy nobody "
             "reviews, such as a redacted PDF."
         ),
-        default=False,
-    )
-    drop_scraps: bool = Field(
-        description="Drop detections that are only stopwords or have no run of two letters or digits",
-        default=False,
-    )
+    ),
+]
+DropScraps = Annotated[
+    bool,
+    Field(description="Drop detections that are only stopwords or have no run of two letters or digits"),
+]
+
+
+class RedactInput(RedactionSettings):
+    """One text to redact, sent to `POST /anonymize/`."""
+
+    text: str = Field(description="Text to redact")
+    repeat_everywhere: RepeatEverywhere = False
+    drop_scraps: DropScraps = False
 
 
 class RedactBatchInput(RedactionSettings):
     """Several texts to redact in one call, sent to `POST /anonymize/batch`."""
 
     texts: list[str] = Field(description="Texts to redact, one output returned per text in the same order")
-    repeat_everywhere: bool = RedactInput.model_fields["repeat_everywhere"]
-    drop_scraps: bool = RedactInput.model_fields["drop_scraps"]
+    repeat_everywhere: RepeatEverywhere = False
+    drop_scraps: DropScraps = False
 
 
 class Entity(BaseModel):
