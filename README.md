@@ -1,6 +1,6 @@
 # anony-mate-api
 
-AnonyMate is the backend of a modern web application for redacting sensitive information from free-form text and PDF documents. Built with FastAPI and Python 3.13, it converts documents to text (Docling), detects sensitive entities (GLiNER), and writes redaction marks back onto PDFs for an editor such as Kofax Power PDF or Acrobat to apply.
+AnonyMate is the backend of a modern web application for redacting sensitive information from free-form text and PDF documents. Built with FastAPI and Python 3.15, it converts documents to text (Docling), detects sensitive entities (GLiNER), and writes redaction marks back onto PDFs for an editor such as Kofax Power PDF or Acrobat to apply.
 
 This repository contains the backend API; the frontend is built with Nuxt 4 and available at [https://github.com/DCC-BS/anony-mate-frontend](https://github.com/DCC-BS/anony-mate-frontend).
 
@@ -30,7 +30,7 @@ This repository contains the backend API; the frontend is built with Nuxt 4 and 
 ## Technology Stack
 
 - **Framework**: [FastAPI](https://fastapi.tiangolo.com/) (ASGI via [Uvicorn](https://www.uvicorn.org/))
-- **Python**: 3.13, packaged with [Hatchling](https://hatch.pypa.io/) + version-pioneer
+- **Python**: 3.15, packaged with [Hatchling](https://hatch.pypa.io/) + version-pioneer
 - **Package & Environment Manager**: [uv](https://docs.astral.sh/uv/)
 - **Document Conversion**: [Docling / docling-serve](https://github.com/docling-project/docling-serve)
 - **Entity Detection**: [GLiNER](https://github.com/urchade/Gliner-api) via dcc-gliner-api
@@ -140,7 +140,8 @@ The API documentation (OpenAPI/Swagger) is served at `http://localhost:8000/docs
 ### Python Client
 
 The client library ships as its own lightweight package, `anony-mate-lib`
-(the `lib/` workspace member; it needs only `httpx` and `pydantic`):
+(a standalone project in [`lib/`](lib/); it needs only `httpx` and `pydantic`).
+Its API is documented in [`lib/README.md`](lib/README.md):
 
 ```bash
 uv add "anony-mate-lib @ git+https://github.com/DCC-BS/anony-mate-api#subdirectory=lib"
@@ -160,7 +161,7 @@ async with AnonyMateClient("http://localhost:8000") as client:
 
 The request and response models live in `anony_mate_lib.models`; the building
 blocks the client itself is made of — preset and task polling helpers for use
-with an own `httpx` client — one level below. See `lib/README.md` for details.
+with an own `httpx` client — one level below.
 
 ---
 
@@ -212,6 +213,7 @@ src/anony_mate_api/
 ├── models/                 # Pydantic request/response models
 └── utils/                  # Configuration & helpers
 tests/                      # pytest suite (incl. doctests)
+lib/                        # anony-mate-lib client package (API docs: lib/README.md)
 tools/                      # Load testing
 ```
 
@@ -222,7 +224,7 @@ tools/                      # Load testing
 ### Tests (pytest)
 
 ```bash
-# Run the test suite (including doctests)
+# Run the test suite (including doctests), API server and client library
 mise run test:unit
 ```
 
