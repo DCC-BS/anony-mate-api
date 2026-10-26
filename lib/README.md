@@ -74,10 +74,10 @@ Settings given on a call replace the presets for that call:
 result = await client.anonymize_text(
     RedactInput(
         text="Anna wohnt in Berlin.",
-        threshold=0.9,                                        # confidence cut-off, default 0.8
-        entity_types={"person": "A natural person"},          # label: description
+        threshold=0.9,  # confidence cut-off, default 0.8
+        entity_types={"person": "A natural person"},  # label: description
         blacklist=["Berlin"],
-        repeat_everywhere=True,   # find every detection wherever else its text stands
+        repeat_everywhere=True,  # find every detection wherever else its text stands
     )
 )
 ```
@@ -96,7 +96,7 @@ async with AnonyMateClient("http://localhost:8000") as client:
     )
 
 for out in outputs:
-    print(out.text)                       # detections written as [label:id]
+    print(out.text)  # detections written as [label:id]
     for label, entities in out.entities.items():
         for entity in entities:
             print(f"  {label}: {entity.text!r} at {entity.start}–{entity.end} ({entity.confidence:.0%})")
@@ -115,8 +115,8 @@ from anony_mate_lib import AnonyMateClient
 async with AnonyMateClient("http://localhost:8000") as client:
     result = await client.anonymize_document(Path("bericht.docx").read_bytes(), "bericht.docx")
 
-print(result.redacted_text)   # the markdown with every detection written as [label:id]
-print(result.page_offsets)    # where each page starts in result.text (the unredacted markdown)
+print(result.redacted_text)  # the markdown with every detection written as [label:id]
+print(result.page_offsets)  # where each page starts in result.text (the unredacted markdown)
 ```
 
 ## Redacting PDFs
@@ -132,8 +132,8 @@ async with AnonyMateClient("http://localhost:8000") as client:
     marks = await client.anonymize_pdf(Path("scan.pdf").read_bytes(), "scan.pdf")
 
 for mark in marks.annotations:
-    print(mark.id, mark.label, repr(mark.text), mark.boxes)   # one box per line, in points
-print(marks.page_sizes)   # {"1": [595.0, 842.0], …} — width and height per page, in points
+    print(mark.id, mark.label, repr(mark.text), mark.boxes)  # one box per line, in points
+print(marks.page_sizes)  # {"1": [595.0, 842.0], …} — width and height per page, in points
 ```
 
 With `marked_pdf=True` the answer is the PDF itself, a redaction mark on every
@@ -170,7 +170,7 @@ marks = [
         label="person",
         text="Anna Muster",
         boxes=[MarkBox(page=1, left=72, top=100, right=200, bottom=112)],
-        overlay="[person:1]",   # written into the area once applied; without one it is filled
+        overlay="[person:1]",  # written into the area once applied; without one it is filled
     )
 ]
 
@@ -189,14 +189,14 @@ from httpx import AsyncClient
 from anony_mate_lib import get_entity_types, get_json_resource, poll_status
 
 async with AsyncClient(base_url="http://localhost:8000", timeout=60.0) as http:
-    entity_types = await get_entity_types(http)            # {"person": "…", …}, preset "default"
-    verbose = await get_entity_types(http, verbose=True)   # {"person": {"name": …, "description": …}}
+    entity_types = await get_entity_types(http)  # {"person": "…", …}, preset "default"
+    verbose = await get_entity_types(http, verbose=True)  # {"person": {"name": …, "description": …}}
 
     response = await http.post("/anonymize/", json={"text": "…", "entity_types": entity_types})
     task_id = response.json()["task_id"]
 
-    task = await poll_status(http, task_id)                # polling keeps the task alive
-    result = await get_json_resource(http, task.resource_id)   # fetched exactly once
+    task = await poll_status(http, task_id)  # polling keeps the task alive
+    result = await get_json_resource(http, task.resource_id)  # fetched exactly once
 ```
 
 The helpers: `get_entity_types` / `get_blacklist` read the presets,
