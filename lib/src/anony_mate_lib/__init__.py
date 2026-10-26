@@ -18,11 +18,15 @@ from anony_mate_lib.errors import AnonyMateError, MissingResourceError, TaskFail
 from anony_mate_lib.models.blacklist_type import BlacklistType
 from anony_mate_lib.models.entity_type import EntityType
 from anony_mate_lib.models.redact_models import (
+    DocumentRedactOutput,
     MarkAnnotationInput,
     MarkBox,
     PdfAnnotationsOutput,
+    RedactBatchInput,
+    RedactFileOptions,
     RedactInput,
     RedactOutput,
+    RedactPdfAnnotateInput,
     RedactPdfOptions,
 )
 from anony_mate_lib.models.tasks import TaskAccepted, TaskState
@@ -34,13 +38,17 @@ __all__ = [
     "AnonyMateClient",
     "AnonyMateError",
     "BlacklistType",
+    "DocumentRedactOutput",
     "EntityType",
     "MarkAnnotationInput",
     "MarkBox",
     "MissingResourceError",
     "PdfAnnotationsOutput",
+    "RedactBatchInput",
+    "RedactFileOptions",
     "RedactInput",
     "RedactOutput",
+    "RedactPdfAnnotateInput",
     "RedactPdfOptions",
     "TaskAccepted",
     "TaskFailedError",
