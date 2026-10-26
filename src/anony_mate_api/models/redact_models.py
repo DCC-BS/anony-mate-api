@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import BaseModel, BeforeValidator, Field
 
 if TYPE_CHECKING:
-    from anony_mate_api.models.marked_pdf import PdfAnnotations
+    from .marked_pdf import PdfAnnotations
 
 
 class RedactionSettings(BaseModel):
