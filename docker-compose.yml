@@ -21,7 +21,7 @@ services:
       volumes:
           - "${HOME:-/root}/.cache/docling:/models"
   # vllm:
-  #   image: vllm/vllm-openai:v0.26.0
+  #   image: vllm/vllm-openai:v0.32.0
   #   container_name: vllm_anony_mate_backend
   #   ports:
   #     - ${LLM_API_PORT}:8000
