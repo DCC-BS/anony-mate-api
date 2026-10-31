@@ -1,6 +1,6 @@
 [project]
 name = "anony-mate-api"
-version = "0.1.1"
+version = "0.1.2"
 description = "Tool for anonymize textTool for anonymize text"
 authors = [
     {name = "Data Competence Center Basel-Stadt", email = "dcc@bs.ch"},
