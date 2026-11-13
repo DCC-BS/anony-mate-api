@@ -16,10 +16,10 @@ class EntityTypeInfo(BaseModel):
     name: str
     #: What the label means, in the words the detection model reads.
     #:
-    #: Not documentation: it is sent to the model with the text and is most of
-    #: what the model has to go on. A thin one costs recall, and on a dense
-    #: document costs it silently — a chunk comes back with nothing rather than
-    #: with less.
+    #: Not documentation. The model reads it alongside the text, and it is most
+    #: of what the model has to go on. A thin one costs recall. On a dense
+    #: document the loss is silent, because a chunk comes back with nothing
+    #: rather than with less.
     description: str
 
 
@@ -38,12 +38,15 @@ ENTITY_TYPES: dict[str, EntityTypeInfo] = {
             "Name einer natürlichen Person, auch abgekürzt, verdreht oder fehlerhaft geschrieben: Vor- "
             "und Nachname z.B. 'Sandra Bircher', umgekehrt mit Komma z.B. 'Bircher, Sandra', abgekürzter "
             "Vorname als einzelner Buchstabe mit oder ohne Punkt plus Nachname z.B. 'R. Holzer' oder 'R "
-            "Holzer', sowie Nachname allein z.B. 'gemäss Holzer'. Ein Nachname nach einer Anrede oder einem Titel ist immer zu erfassen, z.B. 'Mueller' in 'Herr Mueller', 'Holzer' in 'Frau Holzer', 'Kaeufer' in 'Frau Dr. Kaeufer', 'Bircher' in 'Herrn Bircher' — auch wenn kein Vorname dabei steht und der Nachname sonst wie ein gewöhnliches Wort aussieht. Auch wenn der Name "
-            "Tippfehler enthält, klein geschrieben ist oder ohne Leerzeichen am vorangehenden Wort klebt. "
-            "Auch Namen in Unterschriftenblöcken und Absenderzeilen. Titel und Anreden wie Frau, Herr, "
-            "Dr. gehören nicht zur Fundstelle. Keine Rollen- oder Funktionsbezeichnungen wie Klientin, "
-            "Patientin, Klägerin, Gesuchstellerin, Mutter, Vater, Beistandsperson, Sachbearbeiter — auch "
-            "dann nicht, wenn sie für eine bestimmte Person stehen."
+            "Holzer', sowie Nachname allein z.B. 'gemäss Holzer'. Ein Nachname nach einer Anrede oder "
+            "einem Titel ist immer zu erfassen, z.B. 'Mueller' in 'Herr Mueller', 'Holzer' in 'Frau "
+            "Holzer', 'Kaeufer' in 'Frau Dr. Kaeufer', 'Bircher' in 'Herrn Bircher'. Das gilt auch ohne "
+            "Vornamen und auch dann, wenn der Nachname sonst wie ein gewöhnliches Wort aussieht. Auch wenn "
+            "der Name Tippfehler enthält, klein geschrieben ist oder ohne Leerzeichen am vorangehenden Wort "
+            "klebt. Auch Namen in Unterschriftenblöcken und Absenderzeilen. Titel und Anreden wie Frau, "
+            "Herr, Dr. gehören nicht zur Fundstelle. Keine Rollen- oder Funktionsbezeichnungen wie "
+            "Klientin, Patientin, Klägerin, Gesuchstellerin, Mutter, Vater, Beistandsperson, "
+            "Sachbearbeiter, auch dann nicht, wenn sie für eine bestimmte Person stehen."
         ),
     ),
     "organisation": EntityTypeInfo(
@@ -75,8 +78,8 @@ ENTITY_TYPES: dict[str, EntityTypeInfo] = {
             "Name einer Gemeinde, Stadt, eines Quartiers oder Landes, in allen Landessprachen, z.B. 'von "
             "Muttenz', 'in Riehen', 'Ependes (VD)', 'Cugnasco-Gerra', 'Libanon'. Der Ortsname direkt nach "
             "einer vierstelligen Postleitzahl ist immer zu erfassen, z.B. 'Muttenz' in '4127 Muttenz', "
-            "'Basel' in '4057 Basel', 'Zuerich' in '8001 Zuerich' — auch wenn davor eine Strasse steht "
-            "und auch wenn danach ein Komma folgt. Nur der Ortsname gehoert zur Fundstelle, weder die "
+            "'Basel' in '4057 Basel', 'Zuerich' in '8001 Zuerich'. Das gilt auch, wenn davor eine "
+            "Strasse steht oder danach ein Komma folgt. Nur der Ortsname gehoert zur Fundstelle, weder die "
             "Postleitzahl noch der Strassenname. Ein nachgestelltes Kantonskuerzel in Klammern gehoert "
             "zur Fundstelle. Nicht im Namen einer Behoerde wie 'Sozialhilfe Basel-Stadt', kein "
             "Funkrufname, nicht das Wort 'Ort' selbst und nicht 'Schweiz' in allgemeinen Wendungen wie "
@@ -272,9 +275,9 @@ def create_router() -> APIRouter:
 
     @router.get("/{type_name}")
     async def entity_types(type_name: EntityType, verbose: bool = False) -> dict[str, str] | dict[str, EntityTypeInfo]:
-        """The available entity types of a preset — `default`, `legal` or
-        `full` — as `label: description`, ready to pass as `entity_types`
-        when redacting. With `verbose`, each entry also carries the type's
+        """The entity types of the `default`, `legal` or `full` preset, as
+        `label: description`, ready to pass as `entity_types` when
+        redacting. With `verbose`, each entry also carries the type's
         display `name`, for interfaces."""
         types = {label: ENTITY_TYPES[label] for label in PRESETS[type_name]}
         if verbose:
