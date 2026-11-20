@@ -1,6 +1,6 @@
 [project]
 name = "anony-mate-api"
-version = "0.1.5"
+version = "0.1.6"
 description = "Tool for anonymize textTool for anonymize text"
 authors = [
     {name = "Data Competence Center Basel-Stadt", email = "dcc@bs.ch"},
@@ -12,7 +12,7 @@ requires-python = ">=3.15, <3.16"
 license = "MIT"
 license-files = ["LICEN[CS]E*"]
 dependencies = [
-    "dcc-backend-common[pydantic_ai]>=0.1.24",
+    "dcc-backend-common[fastapi,pydantic_ai]>=0.1.25",
     "dependency-injector>=4.48.3",
     "fastapi[standard]>=0.115.0",
     "structlog>=25.1.0",
