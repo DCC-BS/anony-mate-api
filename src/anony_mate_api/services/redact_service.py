@@ -267,7 +267,8 @@ class RedactService:
                 content_type=content_type,
                 request_bytes=len(body_bytes),
                 correlation_id=correlation_id,
-                body=e.response.text[:2000],
+                # FastAPI's 422 body echoes the request input, i.e. the text to redact.
+                body=e.response.text[:2000] if e.response.status_code != 422 else None,
                 **files_log,
             )
             raise ApiErrorException({
